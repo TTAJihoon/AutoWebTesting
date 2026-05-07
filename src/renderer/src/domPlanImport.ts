@@ -470,7 +470,7 @@ function readOptionalNumber(
   if (value === undefined) {
     return undefined;
   }
-  if (!Number.isInteger(value) || value < 100 || value > 120000) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 100 || value > 120000) {
     errors.push(`${label}.${field}는 100 이상 120000 이하의 정수여야 합니다.`);
     return undefined;
   }

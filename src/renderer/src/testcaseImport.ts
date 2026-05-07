@@ -203,7 +203,7 @@ function readOptionalString(input: Record<string, unknown>, field: string): stri
 
 function readNumber(input: Record<string, unknown>, field: string, label: string, errors: string[]): number | undefined {
   const value = input[field];
-  if (!Number.isInteger(value)) {
+  if (typeof value !== "number" || !Number.isInteger(value)) {
     errors.push(`${label}.${field}는 정수여야 합니다.`);
     return undefined;
   }
