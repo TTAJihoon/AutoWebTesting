@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tta.example/autowebtesting/testcase.schema.json",
+  "title": "AutoWebTesting Testcase Import",
+  "type": "object",
+  "required": ["schemaVersion", "sourceMode", "generationLevel", "testCases"],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "sourceMode": {
+      "type": "string",
+      "enum": ["API", "GPT_WEB_IMPORT"]
+    },
+    "generationLevel": {
+      "type": "string",
+      "enum": ["STANDARD", "DETAILED"]
+    },
+    "testCases": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/testCase"
+      },
+      "minItems": 1
+    }
+  },
+  "$defs": {
+    "testCase": {
+      "type": "object",
+      "required": [
+        "tcId",
+        "minorCategoryNo",
+        "tcSeqNo",
+        "majorCategory",
+        "middleCategory",
+        "minorCategory",
+        "scenario",
+        "precondition",
+        "expectedResult",
+        "reviewStatus",
+        "automationTarget",
+        "riskLevel",
+        "riskFlags"
+      ],
+      "properties": {
+        "tcId": {
+          "type": "string",
+          "pattern": "^TC_[0-9]{3}-[0-9]{3}$"
+        },
+        "minorCategoryNo": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "tcSeqNo": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "majorCategory": {
+          "type": "string",
+          "minLength": 1
+        },
+        "middleCategory": {
+          "type": "string",
+          "minLength": 1
+        },
+        "minorCategory": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scenario": {
+          "type": "string",
+          "minLength": 1
+        },
+        "precondition": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expectedResult": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reviewStatus": {
+          "type": "string",
+          "enum": ["DRAFT", "APPROVED", "NEEDS_REVISION", "REJECTED", "EXCLUDED", "DEPRECATED"]
+        },
+        "automationTarget": {
+          "type": "boolean"
+        },
+        "automationReason": {
+          "type": "string"
+        },
+        "riskLevel": {
+          "type": "string",
+          "enum": ["LOW", "MEDIUM", "HIGH", "PROHIBITED"]
+        },
+        "riskFlags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/riskFlag"
+          },
+          "uniqueItems": true
+        },
+        "riskReason": {
+          "type": "string"
+        },
+        "generationReason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "riskFlag": {
+      "type": "string",
+      "enum": [
+        "PAYMENT",
+        "DELETE_DATA",
+        "SEND_EXTERNAL_MESSAGE",
+        "SUBMIT_TO_EXTERNAL_SYSTEM",
+        "DOWNLOAD_SENSITIVE_DATA",
+        "CHANGE_PERMISSION",
+        "CHANGE_SECURITY_SETTING",
+        "PUBLIC_PUBLISH",
+        "IRREVERSIBLE_ACTION",
+        "LEGAL_OR_FINANCIAL_ACTION"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tta.example/autowebtesting/dom-summary.schema.json",
+  "title": "AutoWebTesting DOM Summary",
+  "type": "object",
+  "required": ["schemaVersion", "page", "elements"],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "page": {
+      "type": "object",
+      "required": ["url", "title"],
+      "properties": {
+        "url": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "heading": {
+          "type": "string"
+        },
+        "visibleTextSummary": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "forms": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["formId", "elementIds"],
+        "properties": {
+          "formId": {
+            "type": "string",
+            "pattern": "^form_[0-9]{4}$"
+          },
+          "title": {
+            "type": "string"
+          },
+          "elementIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^el_[0-9]{4}$"
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "elements": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/element"
+      }
+    }
+  },
+  "$defs": {
+    "element": {
+      "type": "object",
+      "required": ["elementId", "role", "tag", "visible", "enabled"],
+      "properties": {
+        "elementId": {
+          "type": "string",
+          "pattern": "^el_[0-9]{4}$"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "textbox",
+            "textarea",
+            "button",
+            "link",
+            "select",
+            "checkbox",
+            "radio",
+            "file",
+            "table",
+            "menuitem",
+            "heading",
+            "text",
+            "dialog",
+            "unknown"
+          ]
+        },
+        "tag": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "placeholder": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "visible": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "nearbyText": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "formId": {
+          "type": "string",
+          "pattern": "^form_[0-9]{4}$"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

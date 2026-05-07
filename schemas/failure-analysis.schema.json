@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tta.example/autowebtesting/failure-analysis.schema.json",
+  "title": "AutoWebTesting Failure Analysis",
+  "type": "object",
+  "required": ["schemaVersion", "failureAnalyses"],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "failureAnalyses": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/failureAnalysis"
+      }
+    }
+  },
+  "$defs": {
+    "failureAnalysis": {
+      "type": "object",
+      "required": [
+        "tcId",
+        "failureSummary",
+        "likelyCauseCategory",
+        "recommendedReview",
+        "finalResult"
+      ],
+      "properties": {
+        "tcId": {
+          "type": "string",
+          "pattern": "^TC_[0-9]{3}-[0-9]{3}$"
+        },
+        "failureSummary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "likelyCauseCategory": {
+          "type": "string",
+          "enum": [
+            "APPLICATION_DEFECT",
+            "EXPECTED_RESULT_MISMATCH",
+            "MAPPING_ERROR",
+            "SCRIPT_ERROR",
+            "ENVIRONMENT_ERROR",
+            "DATA_ISSUE",
+            "PERMISSION_OR_SESSION",
+            "UNKNOWN"
+          ]
+        },
+        "recommendedReview": {
+          "type": "string",
+          "minLength": 1
+        },
+        "suggestedNextAction": {
+          "type": "string"
+        },
+        "finalResult": {
+          "type": "string",
+          "enum": ["F", "MANUAL_REVIEW", "NOT_A_PRODUCT_FAILURE"]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

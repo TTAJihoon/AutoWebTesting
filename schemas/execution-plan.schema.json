@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tta.example/autowebtesting/execution-plan.schema.json",
+  "title": "AutoWebTesting Execution Plan",
+  "type": "object",
+  "required": ["schemaVersion", "executionPlans"],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "executionPlans": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/executionPlan"
+      }
+    }
+  },
+  "$defs": {
+    "executionPlan": {
+      "type": "object",
+      "required": ["tcId", "status", "confidence", "steps"],
+      "properties": {
+        "tcId": {
+          "type": "string",
+          "pattern": "^TC_[0-9]{3}-[0-9]{3}$"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["READY", "NEEDS_MAPPING_REVIEW", "NOT_AUTOMATABLE", "SKIPPED_RISK"]
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "reason": {
+          "type": "string"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/step"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "step": {
+      "type": "object",
+      "required": ["action"],
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "goto",
+            "click",
+            "fill",
+            "selectOption",
+            "check",
+            "uncheck",
+            "uploadFile",
+            "waitForText",
+            "assertTextVisible",
+            "assertUrlContains",
+            "assertElementVisible",
+            "assertElementNotVisible",
+            "assertValueEquals",
+            "takeScreenshot"
+          ]
+        },
+        "elementId": {
+          "type": "string",
+          "pattern": "^el_[0-9]{4}$"
+        },
+        "url": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "valueSource": {
+          "type": "string"
+        },
+        "valueLiteral": {
+          "type": "string"
+        },
+        "optionLabel": {
+          "type": "string"
+        },
+        "optionValue": {
+          "type": "string"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 120000
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
