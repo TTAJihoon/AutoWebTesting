@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import { join } from "node:path";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
+import { saveRunArtifacts, type SaveRunArtifactsRequest } from "./runArtifacts";
 import { executePlans, type ExecutePlansRequest } from "../runner/executor";
 import { captureDomSummary, type CaptureDomSummaryRequest } from "../runner/playwrightDomCapture";
 
@@ -48,6 +49,10 @@ app.whenReady().then(() => {
 
   ipcMain.handle("run:execute-plans", async (_event, request: ExecutePlansRequest) => {
     return executePlans(request);
+  });
+
+  ipcMain.handle("run:save-artifacts", async (_event, request: SaveRunArtifactsRequest) => {
+    return saveRunArtifacts(request);
   });
 
   createWindow();

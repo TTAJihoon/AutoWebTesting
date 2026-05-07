@@ -262,6 +262,13 @@ h2 {
   border-bottom: 1px solid #e1e9e7;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: end;
+}
+
 .panel-header.compact {
   min-height: 68px;
 }
@@ -498,6 +505,48 @@ td:nth-child(6) {
   gap: 8px;
 }
 
+.save-result {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #c8d8d5;
+  border-radius: 8px;
+  background: #eef7f5;
+}
+
+.save-result h3 {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: 0;
+}
+
+.save-result p,
+.save-result dd {
+  overflow-wrap: anywhere;
+}
+
+.save-result dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.save-result dl div {
+  display: grid;
+  gap: 3px;
+}
+
+.save-result dt {
+  color: #607176;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.save-result dd {
+  margin: 0;
+  font-size: 13px;
+}
+
 .result-row {
   display: grid;
   gap: 8px;
@@ -654,7 +703,8 @@ td:nth-child(6) {
   .topbar,
   .workspace-grid,
   .mapping-grid,
-  .panel-header {
+  .panel-header,
+  .header-actions {
     display: grid;
     grid-template-columns: 1fr;
   }

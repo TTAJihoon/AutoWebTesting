@@ -1,5 +1,6 @@
 import { useMemo, useState, type ChangeEvent } from "react";
 import type { DomSummary, ExecutionPlanPayload, ReviewStatus, TestCase } from "../../shared/types";
+import type { SaveRunArtifactsResponse } from "../../main/runArtifacts";
 import type { ExecutePlansResponse } from "../../runner/executor";
 import { parseDomSummaryJson, parseExecutionPlanJson } from "./domPlanImport";
 import { parseTestcaseJson, type TestcaseImportPayload } from "./testcaseImport";
@@ -69,6 +70,9 @@ export function App() {
   const [isExecuting, setIsExecuting] = useState<boolean>(false);
   const [runResult, setRunResult] = useState<ExecutePlansResponse | undefined>();
   const [runErrors, setRunErrors] = useState<string[]>([]);
+  const [isSavingRun, setIsSavingRun] = useState<boolean>(false);
+  const [saveResult, setSaveResult] = useState<SaveRunArtifactsResponse | undefined>();
+  const [saveErrors, setSaveErrors] = useState<string[]>([]);
 
   const selectedTestCase = useMemo(
     () => testCases.find((testCase) => testCase.tcId === selectedId) ?? testCases[0],
@@ -242,10 +246,36 @@ export function App() {
         }
       });
       setRunResult(result);
+      setSaveResult(undefined);
+      setSaveErrors([]);
     } catch (error) {
       setRunErrors([error instanceof Error ? error.message : "실행 중 알 수 없는 오류가 발생했습니다."]);
     } finally {
       setIsExecuting(false);
+    }
+  }
+
+  async function handleSaveRunArtifacts() {
+    if (!runResult) {
+      setSaveErrors(["저장할 실행 결과가 없습니다."]);
+      return;
+    }
+
+    setIsSavingRun(true);
+    setSaveErrors([]);
+
+    try {
+      const result = await window.autoWebTesting.saveRunArtifacts({
+        runResult,
+        testCases,
+        domSummary,
+        executionPlans: executionPlanPayload?.executionPlans
+      });
+      setSaveResult(result);
+    } catch (error) {
+      setSaveErrors([error instanceof Error ? error.message : "산출물 저장 중 알 수 없는 오류가 발생했습니다."]);
+    } finally {
+      setIsSavingRun(false);
     }
   }
 
@@ -291,6 +321,8 @@ export function App() {
     setPlanWarnings([]);
     setRunResult(undefined);
     setRunErrors([]);
+    setSaveResult(undefined);
+    setSaveErrors([]);
   }
 
   return (
@@ -573,14 +605,24 @@ export function App() {
             <h2>시험 실행</h2>
             <p>실행계획 JSON을 제한된 Playwright 액션으로 수행합니다.</p>
           </div>
-          <button
-            className="primary-button"
-            type="button"
-            onClick={handleExecutePlans}
-            disabled={!executionPlanPayload || !domSummary || isExecuting}
-          >
-            {isExecuting ? "실행 중" : "승인 계획 실행"}
-          </button>
+          <div className="header-actions">
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={handleSaveRunArtifacts}
+              disabled={!runResult || isSavingRun}
+            >
+              {isSavingRun ? "저장 중" : "산출물 저장"}
+            </button>
+            <button
+              className="primary-button"
+              type="button"
+              onClick={handleExecutePlans}
+              disabled={!executionPlanPayload || !domSummary || isExecuting}
+            >
+              {isExecuting ? "실행 중" : "승인 계획 실행"}
+            </button>
+          </div>
         </div>
 
         <div className="run-content">
@@ -607,6 +649,36 @@ export function App() {
           </div>
 
           <MessageList tone="error" messages={runErrors} emptyText="실행 오류 없음" />
+          <MessageList tone="error" messages={saveErrors} emptyText="저장 오류 없음" />
+
+          {saveResult ? (
+            <div className="save-result">
+              <h3>저장 완료</h3>
+              <p>{saveResult.runDir}</p>
+              <dl>
+                <div>
+                  <dt>Run ID</dt>
+                  <dd>{saveResult.runId}</dd>
+                </div>
+                <div>
+                  <dt>실패 패키지 항목</dt>
+                  <dd>{saveResult.failedCaseCount}</dd>
+                </div>
+                <div>
+                  <dt>결과 JSON</dt>
+                  <dd>{saveResult.files.runResult}</dd>
+                </div>
+                <div>
+                  <dt>실패 패키지 JSON</dt>
+                  <dd>{saveResult.files.failurePackage}</dd>
+                </div>
+                <div>
+                  <dt>HTML 보고서</dt>
+                  <dd>{saveResult.files.htmlReport}</dd>
+                </div>
+              </dl>
+            </div>
+          ) : null}
 
           {runResult ? (
             <div className="result-list">

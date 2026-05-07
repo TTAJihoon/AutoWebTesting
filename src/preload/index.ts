@@ -9,7 +9,13 @@ const api = {
     domSummary: unknown;
     values: Record<string, string>;
     showBrowser?: boolean;
-  }) => ipcRenderer.invoke("run:execute-plans", request)
+  }) => ipcRenderer.invoke("run:execute-plans", request),
+  saveRunArtifacts: (request: {
+    runResult: unknown;
+    testCases: unknown[];
+    domSummary?: unknown;
+    executionPlans?: unknown[];
+  }) => ipcRenderer.invoke("run:save-artifacts", request)
 };
 
 contextBridge.exposeInMainWorld("autoWebTesting", api);
