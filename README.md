@@ -64,6 +64,7 @@ GPT 웹 결과물 업로드 모드
 - 자동화 대상 여부 토글
 - 검토 요약 통계 표시
 - DOM 요약 JSON 업로드 및 검증
+- URL 입력 기반 Playwright DOM 요약 자동 생성
 - DOM elementId 중복 및 형식 확인
 - 실행계획 JSON 업로드 및 승인 TC/DOM 요소 교차 검증
 - 실행계획 상태 요약 표시

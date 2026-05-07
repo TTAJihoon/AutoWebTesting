@@ -454,6 +454,38 @@ td:nth-child(6) {
   padding: 18px;
 }
 
+.capture-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 140px 108px;
+  gap: 10px;
+  align-items: center;
+}
+
+.capture-form input[type="url"] {
+  min-height: 40px;
+  width: 100%;
+  padding: 0 12px;
+  border: 1px solid #c8d8d5;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #182024;
+}
+
+.check-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  color: #405057;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.check-row input {
+  width: 16px;
+  height: 16px;
+}
+
 .role-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -539,7 +571,8 @@ td:nth-child(6) {
 
   .role-grid,
   .plan-metrics,
-  .plan-row {
+  .plan-row,
+  .capture-form {
     grid-template-columns: 1fr;
   }
 }

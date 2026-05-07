@@ -43,6 +43,9 @@ export function App() {
   const [domFileName, setDomFileName] = useState<string>("");
   const [domErrors, setDomErrors] = useState<string[]>([]);
   const [domWarnings, setDomWarnings] = useState<string[]>([]);
+  const [targetUrl, setTargetUrl] = useState<string>("");
+  const [showBrowser, setShowBrowser] = useState<boolean>(false);
+  const [isCapturingDom, setIsCapturingDom] = useState<boolean>(false);
 
   const [executionPlanPayload, setExecutionPlanPayload] = useState<ExecutionPlanPayload | undefined>();
   const [planFileName, setPlanFileName] = useState<string>("");
@@ -141,6 +144,33 @@ export function App() {
     if (result.payload && result.errors.length === 0) {
       setDomSummary(result.payload);
       resetPlan();
+    }
+  }
+
+  async function handleCaptureDomSummary() {
+    if (!targetUrl.trim()) {
+      setDomErrors(["DOM을 생성할 URL을 입력해야 합니다."]);
+      setDomWarnings([]);
+      return;
+    }
+
+    setIsCapturingDom(true);
+    setDomErrors([]);
+    setDomWarnings([]);
+
+    try {
+      const summary = await window.autoWebTesting.captureDomSummary({
+        url: targetUrl.trim(),
+        showBrowser
+      });
+      setDomSummary(summary);
+      setDomFileName("Playwright 자동 생성");
+      setDomWarnings(summary.elements.length === 0 ? ["수집된 DOM 요소가 없습니다."] : []);
+      resetPlan();
+    } catch (error) {
+      setDomErrors([error instanceof Error ? error.message : "DOM 요약 생성 중 알 수 없는 오류가 발생했습니다."]);
+    } finally {
+      setIsCapturingDom(false);
     }
   }
 
@@ -376,7 +406,7 @@ export function App() {
           <div className="panel-header">
             <div>
               <h2>DOM 요약</h2>
-              <p>GPT 웹에 전달할 화면 구조 JSON을 가져옵니다.</p>
+              <p>URL에서 자동 생성하거나 JSON 파일을 가져옵니다.</p>
             </div>
             <label className="compact-picker">
               <input accept="application/json,.json" type="file" onChange={handleDomFileChange} disabled={testCases.length === 0} />
@@ -385,6 +415,22 @@ export function App() {
           </div>
 
           <div className="mapping-content">
+            <div className="capture-form">
+              <input
+                aria-label="DOM 요약 생성 URL"
+                placeholder="https://example.com/login"
+                type="url"
+                value={targetUrl}
+                onChange={(event) => setTargetUrl(event.target.value)}
+              />
+              <label className="check-row">
+                <input type="checkbox" checked={showBrowser} onChange={(event) => setShowBrowser(event.target.checked)} />
+                <span>브라우저 표시</span>
+              </label>
+              <button className="primary-button" type="button" onClick={handleCaptureDomSummary} disabled={isCapturingDom}>
+                {isCapturingDom ? "생성 중" : "DOM 생성"}
+              </button>
+            </div>
             {domFileName ? <p className="file-name">{domFileName}</p> : <p className="muted">TC 업로드 후 DOM 요약 JSON을 선택합니다.</p>}
             {domSummary ? (
               <>

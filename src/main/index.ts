@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import { join } from "node:path";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
+import { captureDomSummary, type CaptureDomSummaryRequest } from "../runner/playwrightDomCapture";
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -39,6 +40,10 @@ app.whenReady().then(() => {
     version: app.getVersion(),
     platform: process.platform
   }));
+
+  ipcMain.handle("dom:capture-summary", async (_event, request: CaptureDomSummaryRequest) => {
+    return captureDomSummary(request);
+  });
 
   createWindow();
 

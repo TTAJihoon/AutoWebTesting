@@ -8,6 +8,7 @@ declare global {
         version: string;
         platform: string;
       }>;
+      captureDomSummary: (request: { url: string; showBrowser?: boolean }) => Promise<import("../../shared/types").DomSummary>;
     };
   }
 }
