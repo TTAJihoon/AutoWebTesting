@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import { join } from "node:path";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
+import { executePlans, type ExecutePlansRequest } from "../runner/executor";
 import { captureDomSummary, type CaptureDomSummaryRequest } from "../runner/playwrightDomCapture";
 
 function createWindow(): void {
@@ -43,6 +44,10 @@ app.whenReady().then(() => {
 
   ipcMain.handle("dom:capture-summary", async (_event, request: CaptureDomSummaryRequest) => {
     return captureDomSummary(request);
+  });
+
+  ipcMain.handle("run:execute-plans", async (_event, request: ExecutePlansRequest) => {
+    return executePlans(request);
   });
 
   createWindow();

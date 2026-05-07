@@ -1,5 +1,6 @@
 import { useMemo, useState, type ChangeEvent } from "react";
 import type { DomSummary, ExecutionPlanPayload, ReviewStatus, TestCase } from "../../shared/types";
+import type { ExecutePlansResponse } from "../../runner/executor";
 import { parseDomSummaryJson, parseExecutionPlanJson } from "./domPlanImport";
 import { parseTestcaseJson, type TestcaseImportPayload } from "./testcaseImport";
 
@@ -28,6 +29,17 @@ const planStatusLabels = {
   SKIPPED_RISK: "위험 제외"
 };
 
+const executionStatusLabels = {
+  NOT_RUN: "미실행",
+  COMPLETED: "수행 완료",
+  BLOCKED: "실행 차단",
+  MAPPING_FAILED: "매핑 실패",
+  SCRIPT_FAILED: "스크립트 실패",
+  SKIPPED_RISK: "위험 제외",
+  MANUAL_REQUIRED: "수동 필요",
+  CANCELLED: "취소"
+};
+
 type FilterStatus = "ALL" | ReviewStatus;
 
 export function App() {
@@ -51,6 +63,12 @@ export function App() {
   const [planFileName, setPlanFileName] = useState<string>("");
   const [planErrors, setPlanErrors] = useState<string[]>([]);
   const [planWarnings, setPlanWarnings] = useState<string[]>([]);
+  const [accountUsername, setAccountUsername] = useState<string>("");
+  const [accountPassword, setAccountPassword] = useState<string>("");
+  const [invalidPassword, setInvalidPassword] = useState<string>("invalid-password");
+  const [isExecuting, setIsExecuting] = useState<boolean>(false);
+  const [runResult, setRunResult] = useState<ExecutePlansResponse | undefined>();
+  const [runErrors, setRunErrors] = useState<string[]>([]);
 
   const selectedTestCase = useMemo(
     () => testCases.find((testCase) => testCase.tcId === selectedId) ?? testCases[0],
@@ -109,6 +127,16 @@ export function App() {
       skippedRisk: plans.filter((plan) => plan.status === "SKIPPED_RISK").length
     };
   }, [executionPlanPayload]);
+
+  const runStats = useMemo(() => {
+    const results = runResult?.results ?? [];
+    return {
+      total: results.length,
+      passed: results.filter((result) => result.testResult === "P").length,
+      failed: results.filter((result) => result.testResult === "F").length,
+      notExecutable: results.filter((result) => result.testResult === "N/A").length
+    };
+  }, [runResult]);
 
   async function handleTestcaseFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -187,6 +215,37 @@ export function App() {
 
     if (result.payload && result.errors.length === 0) {
       setExecutionPlanPayload(result.payload);
+      setRunResult(undefined);
+      setRunErrors([]);
+    }
+  }
+
+  async function handleExecutePlans() {
+    if (!executionPlanPayload || !domSummary) {
+      setRunErrors(["실행계획과 DOM 요약이 모두 필요합니다."]);
+      return;
+    }
+
+    setIsExecuting(true);
+    setRunErrors([]);
+    setRunResult(undefined);
+
+    try {
+      const result = await window.autoWebTesting.executePlans({
+        plans: executionPlanPayload.executionPlans,
+        domSummary,
+        showBrowser,
+        values: {
+          "account.username": accountUsername,
+          "account.password": accountPassword,
+          "testData.invalidPassword": invalidPassword
+        }
+      });
+      setRunResult(result);
+    } catch (error) {
+      setRunErrors([error instanceof Error ? error.message : "실행 중 알 수 없는 오류가 발생했습니다."]);
+    } finally {
+      setIsExecuting(false);
     }
   }
 
@@ -230,6 +289,8 @@ export function App() {
     setPlanFileName("");
     setPlanErrors([]);
     setPlanWarnings([]);
+    setRunResult(undefined);
+    setRunErrors([]);
   }
 
   return (
@@ -504,6 +565,69 @@ export function App() {
             <MessageList tone="warning" messages={planWarnings} emptyText="실행계획 경고 없음" />
           </div>
         </article>
+      </section>
+
+      <section className="run-panel">
+        <div className="panel-header">
+          <div>
+            <h2>시험 실행</h2>
+            <p>실행계획 JSON을 제한된 Playwright 액션으로 수행합니다.</p>
+          </div>
+          <button
+            className="primary-button"
+            type="button"
+            onClick={handleExecutePlans}
+            disabled={!executionPlanPayload || !domSummary || isExecuting}
+          >
+            {isExecuting ? "실행 중" : "승인 계획 실행"}
+          </button>
+        </div>
+
+        <div className="run-content">
+          <div className="credential-grid">
+            <label>
+              <span>account.username</span>
+              <input value={accountUsername} onChange={(event) => setAccountUsername(event.target.value)} />
+            </label>
+            <label>
+              <span>account.password</span>
+              <input type="password" value={accountPassword} onChange={(event) => setAccountPassword(event.target.value)} />
+            </label>
+            <label>
+              <span>testData.invalidPassword</span>
+              <input value={invalidPassword} onChange={(event) => setInvalidPassword(event.target.value)} />
+            </label>
+          </div>
+
+          <div className="metric-list run-metrics">
+            <Metric label="전체" value={runStats.total} />
+            <Metric label="P" value={runStats.passed} />
+            <Metric label="F" value={runStats.failed} />
+            <Metric label="실행 불가" value={runStats.notExecutable} />
+          </div>
+
+          <MessageList tone="error" messages={runErrors} emptyText="실행 오류 없음" />
+
+          {runResult ? (
+            <div className="result-list">
+              {runResult.results.map((result) => (
+                <article className="result-row" key={result.tcId}>
+                  <div>
+                    <span className="mono">{result.tcId}</span>
+                    <strong>{executionStatusLabels[result.executionStatus]}</strong>
+                  </div>
+                  <div>
+                    <span className={`result-pill result-${result.testResult.toLowerCase().replace("/", "")}`}>
+                      {result.testResult}
+                    </span>
+                    <span>{result.steps.length} steps</span>
+                  </div>
+                  {result.failureDetail ? <p>{result.failureDetail}</p> : null}
+                </article>
+              ))}
+            </div>
+          ) : null}
+        </div>
       </section>
     </main>
   );
