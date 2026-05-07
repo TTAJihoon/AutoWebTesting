@@ -50,6 +50,26 @@ GPT 웹 결과물 업로드 모드
 - GPT 웹 결과물 JSON 업로드 흐름
 - Excel 결과서, HTML 보고서, 증적 ZIP 내보내기
 
+## 현재 구현된 기능
+
+- GPT 웹 결과물 형식의 TC JSON 업로드
+- TC JSON 필수 필드 검증
+- TC_ID 중복 및 형식 확인
+- 위험도 및 자동화 대상 여부 표시
+- TC 검토 상태 변경
+  - 승인
+  - 수정 필요
+  - 제외
+  - 반려
+- 자동화 대상 여부 토글
+- 검토 요약 통계 표시
+
+샘플 업로드 파일:
+
+```text
+examples/testcases.sample.json
+```
+
 ## 저장소 구조
 
 ```text
@@ -65,6 +85,9 @@ prompts/
   testcase-generation.prompt.md
   dom-mapping.prompt.md
   failure-analysis.prompt.md
+
+examples/
+  testcases.sample.json
 
 schemas/
   testcase.schema.json
