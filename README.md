@@ -63,11 +63,21 @@ GPT 웹 결과물 업로드 모드
   - 반려
 - 자동화 대상 여부 토글
 - 검토 요약 통계 표시
+- DOM 요약 JSON 업로드 및 검증
+- DOM elementId 중복 및 형식 확인
+- 실행계획 JSON 업로드 및 승인 TC/DOM 요소 교차 검증
+- 실행계획 상태 요약 표시
+  - 실행 가능
+  - 매핑 검토
+  - 자동화 불가
+  - 위험 제외
 
 샘플 업로드 파일:
 
 ```text
 examples/testcases.sample.json
+examples/dom-summary.sample.json
+examples/execution-plan.sample.json
 ```
 
 ## 저장소 구조
@@ -88,6 +98,8 @@ prompts/
 
 examples/
   testcases.sample.json
+  dom-summary.sample.json
+  execution-plan.sample.json
 
 schemas/
   testcase.schema.json

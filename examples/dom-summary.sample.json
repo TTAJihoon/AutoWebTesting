@@ -1,0 +1,65 @@
+{
+  "schemaVersion": "1.0.0",
+  "page": {
+    "url": "https://example.test/login",
+    "title": "로그인",
+    "heading": "로그인",
+    "visibleTextSummary": ["아이디", "비밀번호", "로그인", "비밀번호 찾기"]
+  },
+  "forms": [
+    {
+      "formId": "form_0001",
+      "title": "로그인 폼",
+      "elementIds": ["el_0001", "el_0002", "el_0003"]
+    }
+  ],
+  "elements": [
+    {
+      "elementId": "el_0001",
+      "role": "textbox",
+      "tag": "input",
+      "type": "text",
+      "label": "아이디",
+      "placeholder": "아이디",
+      "name": "username",
+      "required": true,
+      "visible": true,
+      "enabled": true,
+      "nearbyText": ["아이디", "로그인"],
+      "formId": "form_0001"
+    },
+    {
+      "elementId": "el_0002",
+      "role": "textbox",
+      "tag": "input",
+      "type": "password",
+      "label": "비밀번호",
+      "placeholder": "비밀번호",
+      "name": "password",
+      "required": true,
+      "visible": true,
+      "enabled": true,
+      "nearbyText": ["비밀번호", "로그인"],
+      "formId": "form_0001"
+    },
+    {
+      "elementId": "el_0003",
+      "role": "button",
+      "tag": "button",
+      "text": "로그인",
+      "visible": true,
+      "enabled": true,
+      "nearbyText": ["아이디", "비밀번호"],
+      "formId": "form_0001"
+    },
+    {
+      "elementId": "el_0004",
+      "role": "link",
+      "tag": "a",
+      "text": "비밀번호 찾기",
+      "visible": true,
+      "enabled": true,
+      "nearbyText": ["로그인"]
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "schemaVersion": "1.0.0",
+  "executionPlans": [
+    {
+      "tcId": "TC_001-001",
+      "status": "READY",
+      "confidence": 0.94,
+      "reason": "로그인 폼의 아이디, 비밀번호, 로그인 버튼이 명확하게 식별된다.",
+      "steps": [
+        {
+          "action": "fill",
+          "elementId": "el_0001",
+          "valueSource": "account.username"
+        },
+        {
+          "action": "fill",
+          "elementId": "el_0002",
+          "valueSource": "account.password"
+        },
+        {
+          "action": "click",
+          "elementId": "el_0003"
+        },
+        {
+          "action": "waitForText",
+          "text": "로그아웃",
+          "timeoutMs": 10000
+        },
+        {
+          "action": "assertTextVisible",
+          "text": "로그아웃"
+        }
+      ]
+    },
+    {
+      "tcId": "TC_001-002",
+      "status": "READY",
+      "confidence": 0.9,
+      "reason": "동일 로그인 폼에 잘못된 비밀번호를 입력한 뒤 오류 메시지를 확인한다.",
+      "steps": [
+        {
+          "action": "fill",
+          "elementId": "el_0001",
+          "valueSource": "account.username"
+        },
+        {
+          "action": "fill",
+          "elementId": "el_0002",
+          "valueSource": "testData.invalidPassword"
+        },
+        {
+          "action": "click",
+          "elementId": "el_0003"
+        },
+        {
+          "action": "waitForText",
+          "text": "로그인에 실패",
+          "timeoutMs": 10000
+        },
+        {
+          "action": "assertTextVisible",
+          "text": "로그인에 실패"
+        }
+      ]
+    },
+    {
+      "tcId": "TC_002-001",
+      "status": "SKIPPED_RISK",
+      "confidence": 0.86,
+      "reason": "삭제 동작이 포함되어 자동 실행에서 제외한다.",
+      "steps": []
+    }
+  ]
+}
