@@ -695,6 +695,7 @@ export function App() {
                     <span>{result.steps.length} steps</span>
                   </div>
                   {result.failureDetail ? <p>{result.failureDetail}</p> : null}
+                  {result.evidence?.screenshotPath ? <p>스크린샷: {result.evidence.screenshotPath}</p> : null}
                 </article>
               ))}
             </div>

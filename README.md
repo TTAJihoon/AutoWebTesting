@@ -78,6 +78,8 @@ GPT 웹 결과물 업로드 모드
 - 실행 결과 로컬 저장
 - GPT 웹 실패 분석용 `failure-package.json` 생성
 - 기본 HTML 실행 보고서 생성
+- 실패 시 Playwright 스크린샷 저장
+- `failure-package.json`과 HTML 보고서에 스크린샷 경로 포함
 
 샘플 업로드 파일:
 

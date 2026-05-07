@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { chromium, type Locator, type Page } from "playwright";
 import type { DomSummary, DomSummaryElement, ExecutionPlan, ExecutionStep, ExecutionStatus, TestResult } from "../shared/types";
 
@@ -5,6 +8,7 @@ export type RunnerContext = {
   domSummary: DomSummary;
   values: Record<string, string>;
   showBrowser?: boolean;
+  screenshotDir: string;
 };
 
 export type StepExecutionResult = {
@@ -21,6 +25,9 @@ export type PlanExecutionResult = {
   testResult: TestResult;
   currentUrl?: string;
   failureDetail?: string;
+  evidence?: {
+    screenshotPath?: string;
+  };
   steps: StepExecutionResult[];
 };
 
@@ -50,6 +57,7 @@ class RunnerError extends Error {
 export async function executePlans(request: ExecutePlansRequest): Promise<ExecutePlansResponse> {
   const browser = await chromium.launch({ headless: request.showBrowser !== true });
   const runStartedAt = new Date().toISOString();
+  const screenshotDir = await createTempScreenshotDir();
 
   try {
     const results: PlanExecutionResult[] = [];
@@ -57,7 +65,12 @@ export async function executePlans(request: ExecutePlansRequest): Promise<Execut
     for (const plan of request.plans) {
       const page = await browser.newPage();
       try {
-        results.push(await executePlanOnPage(page, plan, request));
+        results.push(
+          await executePlanOnPage(page, plan, {
+            ...request,
+            screenshotDir
+          })
+        );
       } finally {
         await page.close().catch(() => undefined);
       }
@@ -112,10 +125,13 @@ async function executePlanOnPage(
         ? error
         : new RunnerError(error instanceof Error ? error.message : "알 수 없는 실행 오류", "SCRIPT_FAILED");
 
+    const failedStep = plan.steps[steps.length];
+    const screenshotPath = await captureFailureScreenshot(page, context.screenshotDir, plan.tcId).catch(() => undefined);
+
     steps.push({
       stepIndex: steps.length + 1,
-      action: plan.steps[steps.length]?.action ?? "takeScreenshot",
-      elementId: plan.steps[steps.length]?.elementId,
+      action: failedStep?.action ?? "takeScreenshot",
+      elementId: failedStep?.elementId,
       status: "FAILED",
       message: runnerError.message
     });
@@ -126,6 +142,9 @@ async function executePlanOnPage(
       testResult: runnerError.testResult,
       currentUrl: page.url(),
       failureDetail: runnerError.message,
+      evidence: {
+        screenshotPath
+      },
       steps
     };
   }
@@ -368,4 +387,21 @@ async function assertElementVisible(
 
 function escapeCssAttribute(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+async function createTempScreenshotDir(): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "autowebtesting-"));
+  const screenshotDir = join(dir, "screenshots");
+  await mkdir(screenshotDir, { recursive: true });
+  return screenshotDir;
+}
+
+async function captureFailureScreenshot(page: Page, screenshotDir: string, tcId: string): Promise<string> {
+  const screenshotPath = join(screenshotDir, `${sanitizeFileName(tcId)}_fail.png`);
+  await page.screenshot({ path: screenshotPath, fullPage: true });
+  return screenshotPath;
+}
+
+function sanitizeFileName(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "_");
 }

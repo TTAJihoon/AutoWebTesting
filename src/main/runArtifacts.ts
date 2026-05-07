@@ -1,5 +1,5 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { copyFile, mkdir, writeFile } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { app } from "electron";
 import type { ExecutePlansResponse, PlanExecutionResult } from "../runner/executor";
 import type { DomSummary, ExecutionPlan, TestCase } from "../shared/types";
@@ -64,20 +64,26 @@ export async function saveRunArtifacts(request: SaveRunArtifactsRequest): Promis
   const runResultPath = join(runDir, "run-result.json");
   const failurePackagePath = join(runDir, "failure-package.json");
   const htmlReportPath = join(runDir, "report.html");
+  const screenshotsDir = join(runDir, "evidence", "screenshots");
+  await mkdir(screenshotsDir, { recursive: true });
 
-  const failurePackage = createFailurePackage(runId, request);
+  const runResult = await materializeRunResultScreenshots(request.runResult, screenshotsDir);
+  const failurePackage = createFailurePackage(runId, {
+    ...request,
+    runResult
+  });
 
   await writeJson(runResultPath, {
     schemaVersion: "1.0.0",
     runId,
     savedAt: new Date().toISOString(),
-    runResult: request.runResult,
+    runResult,
     testCases: request.testCases,
     domSummary: request.domSummary,
     executionPlans: request.executionPlans
   });
   await writeJson(failurePackagePath, failurePackage);
-  await writeFile(htmlReportPath, createHtmlReport(runId, request.runResult, failurePackage), "utf8");
+  await writeFile(htmlReportPath, createHtmlReport(runId, runResult, failurePackage), "utf8");
 
   return {
     runId,
@@ -88,6 +94,37 @@ export async function saveRunArtifacts(request: SaveRunArtifactsRequest): Promis
       htmlReport: htmlReportPath
     },
     failedCaseCount: failurePackage.failedTestCases.length
+  };
+}
+
+async function materializeRunResultScreenshots(
+  runResult: ExecutePlansResponse,
+  screenshotsDir: string
+): Promise<ExecutePlansResponse> {
+  const results = await Promise.all(
+    runResult.results.map(async (result) => {
+      const sourcePath = result.evidence?.screenshotPath;
+      if (!sourcePath) {
+        return result;
+      }
+
+      const screenshotFileName = basename(sourcePath);
+      const targetPath = join(screenshotsDir, screenshotFileName);
+      await copyFile(sourcePath, targetPath);
+
+      return {
+        ...result,
+        evidence: {
+          ...result.evidence,
+          screenshotPath: join("evidence", "screenshots", screenshotFileName)
+        }
+      };
+    })
+  );
+
+  return {
+    ...runResult,
+    results
   };
 }
 
@@ -135,6 +172,7 @@ function createFailurePackageItem(
       networkErrors: []
     },
     evidence: {
+      screenshotPath: result.evidence?.screenshotPath,
       domSummaryPath: domSummary ? "run-result.json#/domSummary" : undefined
     },
     rawFailureDetail: result.failureDetail
@@ -155,6 +193,7 @@ function createHtmlReport(runId: string, runResult: ExecutePlansResponse, failur
           <td>${escapeHtml(result.executionStatus)}</td>
           <td>${escapeHtml(result.testResult)}</td>
           <td>${escapeHtml(result.failureDetail ?? "")}</td>
+          <td>${result.evidence?.screenshotPath ? `<a href="${escapeHtml(result.evidence.screenshotPath)}">screenshot</a>` : ""}</td>
         </tr>`
     )
     .join("");
@@ -192,6 +231,7 @@ function createHtmlReport(runId: string, runResult: ExecutePlansResponse, failur
           <th>실행 상태</th>
           <th>결과</th>
           <th>상세</th>
+          <th>스크린샷</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
