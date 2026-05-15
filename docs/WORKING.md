@@ -13,16 +13,25 @@
 - ✅ `package.json`: `ajv`, `ajv-formats`, `tsx` 추가
 - ✅ Phase 0.5 마이그레이션 단계 추가 ([`design/15-phase-roadmap.md`](design/15-phase-roadmap.md))
 
-### 남은 작업 (Phase 1 마무리)
-- ⬜ `npm install` 후 `npm run schema:check` 실제 통과 확인
-- ⬜ `npm run typecheck` 통과 확인 (신규 Zod 파일 컴파일 오류 0)
-- ⬜ 검증 실패 시 schema/sample 조정
+## Phase 1 — 완료 ✅
 
-### 다음 작업 (Phase 0.5)
-- `src/shared/types.ts` 기존 타입 → `src/shared/legacy/types.ts`로 이동
-- 신규 모듈은 `src/shared/schemas/*` 사용, 기존 모듈은 legacy 사용 (단계 교체)
-- `src/runner/v2/` 또는 신규 네임스페이스로 마이그레이션 모듈 작성
-- IPC 채널 명칭 정리 (구버전 `run:execute-plans` → 신버전 `run:start` 등)
+- ✅ `npm run schema:check` 통과 (36/36)
+- ✅ `npm run typecheck` 오류 0
+
+## Phase 0.5 — 진행 중
+
+### 완료
+- ✅ `src/shared/types.ts` → `src/shared/legacy/types.ts` 이동 (git rename)
+- ✅ `src/shared/constants.ts` → `src/shared/legacy/constants.ts` 이동
+- ✅ 새 `src/shared/types.ts`, `constants.ts`는 legacy를 re-export하는 진입점 (기존 코드 import 경로 변경 불필요)
+- ✅ 기존 코드 typecheck 통과 (마이그레이션 후에도 동작 보존)
+
+### 남은 작업 (Phase 0.5)
+- ⬜ IPC 채널 명칭 정리: 신규 채널 추가 (`run:start` 등), 기존 `run:execute-plans` 등은 deprecated alias로 유지하다 다음 phase에서 제거
+- ⬜ 기존 runner/main/renderer 모듈을 신규 `src/shared/schemas/*` 기반으로 점진 재구성
+  - 새 코드는 schemas 사용, 기존 코드는 legacy 사용
+  - 또는 신규 네임스페이스(`src/runner/v2/`)에 새 구조 작성 후 단계 교체
+- ⬜ 샘플 JSON 기반 통합 테스트 (1개 TC 실행)
 
 ---
 
