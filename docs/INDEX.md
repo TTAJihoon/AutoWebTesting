@@ -41,6 +41,17 @@
 | `decisions/ADR-003-risk-policy.md` | 3단계 리스크 정책 결정 |
 | `decisions/ADR-004-test-data-cleanup.md` | 자동 생성 데이터 cleanup 정책 결정 |
 | `decisions/ADR-005-gpt-web-import-vs-api-mode.md` | GPT Web Import와 API Mode의 관계 결정 |
+| `decisions/ADR-006-schema-as-contract-zod-as-runtime.md` | JSON Schema는 계약 문서, Zod는 런타임/타입 원천 |
+
+## 스키마와 샘플
+
+JSON Schema 파일(`schemas/`)은 사람과 LLM이 읽는 **계약 문서**다. 실제 런타임 검증과 TS 타입은 `src/shared/schemas/*.ts`의 Zod 스키마가 담당하며, CI 스크립트가 둘의 일치를 검증한다. 자세한 내용은 [`ADR-006`](decisions/ADR-006-schema-as-contract-zod-as-runtime.md) 참고.
+
+| 영역 | 위치 | 설명 |
+|---|---|---|
+| 계약 (사람용) | `schemas/*.schema.json` | 11개 JSON Schema |
+| 샘플 | `examples/*.sample.json` | 각 스키마의 실제 사용 예시 |
+| 런타임 (코드) | `src/shared/schemas/*.ts` | Zod 스키마, `z.infer`로 TS 타입 도출 |
 
 ## LLM 작업 지침
 

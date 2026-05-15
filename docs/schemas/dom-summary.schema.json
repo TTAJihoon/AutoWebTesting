@@ -2,15 +2,134 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://autowebtesting.local/schemas/dom-summary.schema.json",
   "title": "dom-summary",
+  "description": "GPT에 전달하는 화면 요소 요약. 실제 Playwright selector는 포함하지 않는다.",
   "type": "object",
-  "description": "초안 placeholder. 상세 필드는 다음 단계에서 확정한다.",
+  "required": [
+    "schemaVersion",
+    "domSummaryId",
+    "pageStateId",
+    "url",
+    "title",
+    "elements",
+    "capturedAt"
+  ],
+  "additionalProperties": false,
   "properties": {
-    "schemaVersion": {
-      "type": "string"
+    "schemaVersion": { "type": "string", "const": "0.3" },
+    "domSummaryId": { "type": "string", "pattern": "^DOM_[0-9]{3}$" },
+    "pageStateId": { "type": "string", "pattern": "^PAGE_[0-9]{3}$" },
+    "url": { "type": "string", "format": "uri" },
+    "title": { "type": "string" },
+    "capturedAt": { "type": "string", "format": "date-time" },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxElements": { "type": "integer", "default": 250 },
+        "maxVisibleTexts": { "type": "integer", "default": 80 }
+      }
+    },
+    "elements": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/element" },
+      "maxItems": 250
+    },
+    "visibleTexts": {
+      "type": "array",
+      "items": { "type": "string" },
+      "maxItems": 80
+    },
+    "forms": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/form" }
+    },
+    "tables": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/table" }
     }
   },
-  "required": [
-    "schemaVersion"
-  ],
-  "additionalProperties": true
+  "$defs": {
+    "element": {
+      "type": "object",
+      "required": ["elementId", "role", "tag", "visible", "enabled"],
+      "additionalProperties": false,
+      "properties": {
+        "elementId": {
+          "type": "string",
+          "pattern": "^PAGE_[0-9]{3}\\.el_[0-9]{4}$",
+          "description": "{pageStateId}.el_{4자리} 형식"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "textbox", "textarea", "button", "link", "select",
+            "checkbox", "radio", "file", "table", "menuitem",
+            "heading", "text", "dialog", "unknown"
+          ]
+        },
+        "tag": { "type": "string" },
+        "type": { "type": ["string", "null"] },
+        "label": { "type": ["string", "null"] },
+        "text": { "type": ["string", "null"] },
+        "placeholder": { "type": ["string", "null"] },
+        "name": { "type": ["string", "null"] },
+        "required": { "type": "boolean" },
+        "visible": { "type": "boolean" },
+        "enabled": { "type": "boolean" },
+        "nearbyText": { "type": ["string", "null"] },
+        "formId": { "type": ["string", "null"] },
+        "region": {
+          "type": ["string", "null"],
+          "enum": ["search", "table", "form", "toolbar", "modal", "header", "footer", "sidebar", "content", null]
+        }
+      }
+    },
+    "form": {
+      "type": "object",
+      "required": ["formId", "elementIds"],
+      "additionalProperties": false,
+      "properties": {
+        "formId": { "type": "string" },
+        "name": { "type": "string" },
+        "elementIds": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "table": {
+      "type": "object",
+      "required": ["tableId", "elementId", "columns"],
+      "additionalProperties": false,
+      "properties": {
+        "tableId": { "type": "string" },
+        "label": { "type": "string" },
+        "elementId": { "type": "string" },
+        "columns": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "rowActionCandidates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["actionText"],
+            "additionalProperties": false,
+            "properties": {
+              "actionText": { "type": "string" },
+              "column": { "type": "string" },
+              "riskLevel": {
+                "type": "string",
+                "enum": ["LOW", "MEDIUM", "HIGH", "PROHIBITED"]
+              },
+              "riskFlags": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }

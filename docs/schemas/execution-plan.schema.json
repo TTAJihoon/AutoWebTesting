@@ -2,15 +2,334 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://autowebtesting.local/schemas/execution-plan.schema.json",
   "title": "execution-plan",
+  "description": "Playwright Runner가 실행할 수 있도록 확정된 테스트 실행계획. GPT 출력은 검증 통과 후에만 사용한다.",
   "type": "object",
-  "description": "초안 placeholder. 상세 필드는 다음 단계에서 확정한다.",
-  "properties": {
-    "schemaVersion": {
-      "type": "string"
-    }
-  },
   "required": [
-    "schemaVersion"
+    "schemaVersion",
+    "executionPlanId",
+    "tcId",
+    "name",
+    "startPageStateId",
+    "requiredPageStateIds",
+    "testDataProfileId",
+    "riskSummary",
+    "planStatus",
+    "steps"
   ],
-  "additionalProperties": true
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "type": "string", "const": "0.3" },
+    "executionPlanId": { "type": "string", "pattern": "^PLAN_TC_[0-9]{3}_[0-9]{3}$" },
+    "tcId": { "type": "string", "pattern": "^TC_[0-9]{3}-[0-9]{3}$" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "explorationSessionId": { "type": "string" },
+        "candidateCrudFlowId": { "type": "string" },
+        "generatedBy": {
+          "type": "string",
+          "enum": ["GPT_WEB_IMPORT", "API_MODE", "AI_EXPLORATION", "MANUAL"]
+        },
+        "reviewedByHuman": { "type": "boolean" }
+      }
+    },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "startPageStateId": { "type": "string", "pattern": "^PAGE_[0-9]{3}$" },
+    "requiredPageStateIds": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^PAGE_[0-9]{3}$" },
+      "minItems": 1
+    },
+    "testDataProfileId": { "type": "string" },
+    "variablesUsed": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "riskSummary": { "$ref": "#/$defs/riskCheckResult" },
+    "planStatus": {
+      "type": "string",
+      "enum": [
+        "DRAFT",
+        "READY",
+        "NEEDS_MAPPING_REVIEW",
+        "NEEDS_RISK_APPROVAL",
+        "MANUAL_REQUIRED",
+        "NOT_AUTOMATABLE",
+        "REJECTED"
+      ]
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/step" }
+    },
+    "cleanupPlan": { "$ref": "#/$defs/cleanupPlan" }
+  },
+  "$defs": {
+    "riskCheckResult": {
+      "type": "object",
+      "required": ["riskLevel", "riskFlags"],
+      "additionalProperties": false,
+      "properties": {
+        "riskLevel": {
+          "type": "string",
+          "enum": ["LOW", "MEDIUM", "HIGH", "PROHIBITED"]
+        },
+        "maxRiskLevel": {
+          "type": "string",
+          "enum": ["LOW", "MEDIUM", "HIGH", "PROHIBITED"]
+        },
+        "riskFlags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "matchedRiskKeywords": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "requiresApproval": { "type": "boolean" },
+        "approvalScope": {
+          "type": "string",
+          "enum": ["NONE", "PER_ACTION", "PER_TC", "PER_RUN", "FORBIDDEN"]
+        },
+        "reason": { "type": "string" }
+      }
+    },
+    "step": {
+      "oneOf": [
+        { "$ref": "#/$defs/actionStep" },
+        { "$ref": "#/$defs/assertionStep" },
+        { "$ref": "#/$defs/waitStep" },
+        { "$ref": "#/$defs/dialogStep" },
+        { "$ref": "#/$defs/tableActionStep" },
+        { "$ref": "#/$defs/screenshotStep" },
+        { "$ref": "#/$defs/cleanupStep" }
+      ]
+    },
+    "stepCommon": {
+      "type": "object",
+      "properties": {
+        "stepId": { "type": "string", "pattern": "^(STEP|ASSERT|WAIT|DIALOG|TABLE|SHOT|CLEAN)_[0-9]{3}$" },
+        "pageStateId": { "type": "string", "pattern": "^PAGE_[0-9]{3}$" },
+        "description": { "type": "string" },
+        "onFailure": {
+          "type": "string",
+          "enum": ["STOP_TC", "CONTINUE", "TAKE_SCREENSHOT_AND_STOP", "MARK_MANUAL_REQUIRED"]
+        },
+        "riskCheck": { "$ref": "#/$defs/riskCheckResult" },
+        "expectedTransition": { "$ref": "#/$defs/transitionExpectation" }
+      }
+    },
+    "actionStep": {
+      "type": "object",
+      "required": ["stepId", "stepType", "action"],
+      "properties": {
+        "stepId": { "type": "string" },
+        "stepType": { "const": "ACTION" },
+        "pageStateId": { "type": "string" },
+        "description": { "type": "string" },
+        "action": {
+          "type": "string",
+          "enum": [
+            "goto", "click", "fill", "selectOption", "check", "uncheck",
+            "uploadFile", "press", "hover", "clear", "takeScreenshot",
+            "waitForNavigation", "waitForLoadState"
+          ]
+        },
+        "elementId": { "type": "string" },
+        "url": { "type": "string" },
+        "valueSource": { "type": "string", "description": "TestDataProfile 변수명 참조" },
+        "valueLiteral": { "type": "string", "description": "직접 입력값. 민감정보 금지" },
+        "optionLabel": { "type": "string" },
+        "optionValue": { "type": "string" },
+        "timeoutMs": { "type": "integer", "minimum": 100 },
+        "onFailure": { "type": "string" },
+        "riskCheck": { "$ref": "#/$defs/riskCheckResult" },
+        "expectedTransition": { "$ref": "#/$defs/transitionExpectation" }
+      },
+      "additionalProperties": false
+    },
+    "assertionStep": {
+      "type": "object",
+      "required": ["stepId", "stepType", "assertion"],
+      "properties": {
+        "stepId": { "type": "string" },
+        "stepType": { "const": "ASSERTION" },
+        "pageStateId": { "type": "string" },
+        "description": { "type": "string" },
+        "assertion": {
+          "type": "string",
+          "enum": [
+            "assertTextVisible", "assertTextNotVisible",
+            "assertElementVisible", "assertElementNotVisible",
+            "assertValueEquals", "assertValueContains",
+            "assertUrlContains", "assertPageTitleContains",
+            "assertRowContains", "assertRowNotContains", "assertCellEquals",
+            "assertToastVisible", "assertAlertText",
+            "assertEnabled", "assertDisabled",
+            "assertCountEquals", "assertCountGreaterThan",
+            "assertDownloadStarted"
+          ]
+        },
+        "elementId": { "type": "string" },
+        "tableId": { "type": "string" },
+        "expectedText": { "type": "string" },
+        "expectedSubstring": { "type": "string" },
+        "expectedValueSource": { "type": "string" },
+        "expectedCount": { "type": "integer" },
+        "onFailure": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "waitStep": {
+      "type": "object",
+      "required": ["stepId", "stepType", "waitType"],
+      "properties": {
+        "stepId": { "type": "string" },
+        "stepType": { "const": "WAIT" },
+        "pageStateId": { "type": "string" },
+        "description": { "type": "string" },
+        "waitType": {
+          "type": "string",
+          "enum": ["TEXT_APPEAR", "ELEMENT_APPEAR", "ELEMENT_DISAPPEAR", "URL_MATCH", "LOAD_STATE"]
+        },
+        "expectedText": { "type": "string" },
+        "elementId": { "type": "string" },
+        "urlPattern": { "type": "string" },
+        "timeoutMs": { "type": "integer", "minimum": 100 }
+      },
+      "additionalProperties": false
+    },
+    "dialogStep": {
+      "type": "object",
+      "required": ["stepId", "stepType", "dialogType", "response"],
+      "properties": {
+        "stepId": { "type": "string" },
+        "stepType": { "const": "DIALOG" },
+        "pageStateId": { "type": "string" },
+        "description": { "type": "string" },
+        "dialogType": {
+          "type": "string",
+          "enum": ["alert", "confirm", "prompt", "htmlModal", "toast", "popup"]
+        },
+        "expectedTextContains": { "type": "string" },
+        "response": {
+          "type": "string",
+          "enum": ["accept", "dismiss", "fillAndAccept", "close", "manual"]
+        },
+        "promptValueSource": { "type": "string" },
+        "riskCheck": { "$ref": "#/$defs/riskCheckResult" }
+      },
+      "additionalProperties": false
+    },
+    "tableActionStep": {
+      "type": "object",
+      "required": ["stepId", "stepType", "action", "tableId", "rowMatch", "actionText"],
+      "properties": {
+        "stepId": { "type": "string" },
+        "stepType": { "const": "TABLE_ACTION" },
+        "pageStateId": { "type": "string" },
+        "description": { "type": "string" },
+        "action": { "const": "clickRowAction" },
+        "tableId": { "type": "string" },
+        "rowMatch": {
+          "type": "object",
+          "required": ["matchType"],
+          "additionalProperties": false,
+          "properties": {
+            "matchType": {
+              "type": "string",
+              "enum": ["CONTAINS_VALUE", "CELL_EQUALS", "CELL_CONTAINS", "FIRST_ROW", "LAST_ROW"]
+            },
+            "valueSource": { "type": "string" },
+            "valueLiteral": { "type": "string" },
+            "column": { "type": "string" }
+          }
+        },
+        "actionText": { "type": "string" },
+        "riskCheck": { "$ref": "#/$defs/riskCheckResult" },
+        "expectedTransition": { "$ref": "#/$defs/transitionExpectation" }
+      },
+      "additionalProperties": false
+    },
+    "screenshotStep": {
+      "type": "object",
+      "required": ["stepId", "stepType"],
+      "properties": {
+        "stepId": { "type": "string" },
+        "stepType": { "const": "SCREENSHOT" },
+        "pageStateId": { "type": "string" },
+        "description": { "type": "string" },
+        "fileName": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "cleanupStep": {
+      "type": "object",
+      "required": ["stepId", "stepType", "cleanupId"],
+      "properties": {
+        "stepId": { "type": "string" },
+        "stepType": { "const": "CLEANUP" },
+        "pageStateId": { "type": "string" },
+        "description": { "type": "string" },
+        "cleanupId": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "transitionExpectation": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "NONE", "URL_CHANGE", "DOM_CHANGE", "TEXT_APPEAR", "ELEMENT_APPEAR",
+            "MODAL_OPEN", "MODAL_CLOSE", "POPUP_OPEN", "DIALOG_OPEN",
+            "TAB_CHANGE", "IFRAME_CHANGE",
+            "URL_CHANGE_OR_DOM_CHANGE", "URL_CHANGE_OR_TEXT_APPEAR"
+          ]
+        },
+        "expectedNextPageStateId": { "type": "string", "pattern": "^PAGE_[0-9]{3}$" },
+        "urlPattern": { "type": "string" },
+        "requiredTexts": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "timeoutMs": { "type": "integer", "minimum": 100 }
+      }
+    },
+    "cleanupPlan": {
+      "type": "object",
+      "required": ["policy", "items"],
+      "additionalProperties": false,
+      "properties": {
+        "policy": {
+          "type": "string",
+          "enum": ["NO_CLEANUP", "MANUAL_CLEANUP", "AUTO_CLEANUP_APPROVAL_REQUIRED", "AUTO_CLEANUP_SAFE_ONLY"]
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["cleanupId", "entityType", "matchValueSource", "strategy"],
+            "additionalProperties": false,
+            "properties": {
+              "cleanupId": { "type": "string" },
+              "entityType": { "type": "string" },
+              "matchValueSource": { "type": "string" },
+              "strategy": {
+                "type": "string",
+                "enum": ["DELETE_CREATED_ROW", "DEACTIVATE_CREATED_ITEM", "ROLLBACK_BY_UI", "MANUAL_CLEANUP", "NO_CLEANUP"]
+              },
+              "requiresApproval": { "type": "boolean" },
+              "riskCheck": { "$ref": "#/$defs/riskCheckResult" }
+            }
+          }
+        }
+      }
+    }
+  }
 }

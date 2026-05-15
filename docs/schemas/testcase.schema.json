@@ -2,15 +2,97 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://autowebtesting.local/schemas/testcase.schema.json",
   "title": "testcase",
+  "description": "GPT 또는 AI 탐색이 생성한 테스트케이스 묶음. 사람 검토 후 reviewStatus를 갱신한다.",
   "type": "object",
-  "description": "초안 placeholder. 상세 필드는 다음 단계에서 확정한다.",
+  "required": ["schemaVersion", "testCases"],
+  "additionalProperties": false,
   "properties": {
-    "schemaVersion": {
-      "type": "string"
+    "schemaVersion": { "type": "string", "const": "0.3" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "sourceMode": {
+      "type": "string",
+      "enum": ["GPT_WEB_IMPORT", "API_MODE", "AI_EXPLORATION", "MANUAL"]
+    },
+    "testCases": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/testCase" }
     }
   },
-  "required": [
-    "schemaVersion"
-  ],
-  "additionalProperties": true
+  "$defs": {
+    "testCase": {
+      "type": "object",
+      "required": [
+        "tcId",
+        "majorCategory",
+        "middleCategory",
+        "minorCategory",
+        "scenario",
+        "precondition",
+        "expectedResult",
+        "reviewStatus",
+        "automationTarget",
+        "riskLevel",
+        "riskFlags"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "tcId": {
+          "type": "string",
+          "pattern": "^TC_[0-9]{3}-[0-9]{3}$",
+          "description": "TC_{소분류번호}-{순번} 형식"
+        },
+        "minorCategoryNo": { "type": "integer", "minimum": 1 },
+        "tcSeqNo": { "type": "integer", "minimum": 1 },
+        "majorCategory": { "type": "string", "minLength": 1 },
+        "middleCategory": { "type": "string", "minLength": 1 },
+        "minorCategory": { "type": "string", "minLength": 1 },
+        "scenario": { "type": "string", "minLength": 1 },
+        "precondition": { "type": "string" },
+        "expectedResult": { "type": "string", "minLength": 1 },
+        "reviewStatus": {
+          "type": "string",
+          "enum": ["DRAFT", "APPROVED", "NEEDS_REVISION", "REJECTED", "EXCLUDED", "DEPRECATED"]
+        },
+        "automationTarget": { "type": "boolean" },
+        "automationReason": { "type": "string" },
+        "riskLevel": {
+          "type": "string",
+          "enum": ["LOW", "MEDIUM", "HIGH", "PROHIBITED"]
+        },
+        "riskFlags": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/riskFlag" },
+          "uniqueItems": true
+        },
+        "riskReason": { "type": "string" },
+        "generationReason": { "type": "string" },
+        "testDataRefs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "참조하는 TestDataProfile 변수명 목록"
+        },
+        "assertionRefs": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "riskFlag": {
+      "type": "string",
+      "enum": [
+        "PAYMENT",
+        "DELETE_DATA",
+        "SEND_EXTERNAL_MESSAGE",
+        "SUBMIT_TO_EXTERNAL_SYSTEM",
+        "DOWNLOAD_SENSITIVE_DATA",
+        "CHANGE_PERMISSION",
+        "CHANGE_SECURITY_SETTING",
+        "PUBLIC_PUBLISH",
+        "IRREVERSIBLE_ACTION",
+        "LEGAL_OR_FINANCIAL_ACTION"
+      ]
+    }
+  }
 }

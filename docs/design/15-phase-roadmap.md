@@ -16,12 +16,45 @@ related:
 - TypeScript strict 설정
 - 공통 타입과 스키마 기본 구성
 
+## Phase 0.5 — 기존 코드 정리 및 마이그레이션
+
+기존 `src/` 코드는 단일 화면 + 단순 elementId 기준이다. 새 설계는 다중 PageState, ElementRegistry 분리, ExplorationSession 등 신규 개념이 다수 도입된다.
+
+### 작업
+
+- `src/shared/types.ts` 기존 타입 → `src/shared/schemas/*.ts` (Zod) 기반으로 점진 교체
+  - 기존 타입은 `legacy.ts`로 분리하여 단계적 제거
+- 기존 `src/runner/` 모듈은 신규 모듈과 병행하다가 검증 후 교체
+  - 신규 모듈은 `src/runner/v2/` 또는 별도 네임스페이스로 분리
+- IPC 채널 명칭 정리 (구버전 `run:execute-plans` → 신버전 `run:start` 등)
+- `schemas/`(프로젝트 루트) → `docs/schemas/`로 이전 검토
+- `prompts/` 폴더 위치/내용 갱신 (다중 PageState 반영)
+
+### 완료 조건 (DoD)
+
+- [ ] 기존 `executor.ts`/`playwrightDomCapture.ts` 기능을 신규 구조에서 동일하게 실행 가능
+- [ ] 통합 테스트(샘플 JSON 기반 1개 TC 실행) 통과
+- [ ] 마이그레이션 완료 모듈 목록 문서화
+
 ## Phase 1 — 문서/스키마 기반 구조 확정
 
+### 작업
+
 - INDEX.md / WORKING.md 적용
-- JSON Schema 초안 작성
-- TypeScript 타입 초안 작성
-- 샘플 JSON 작성
+- JSON Schema 11개 실제 필드까지 정의 (placeholder 제거)
+- `src/shared/schemas/*.ts` Zod 스키마 작성 (JSON Schema와 일치)
+- `src/shared/types.ts`를 `z.infer`로 단계 교체
+- 샘플 JSON 작성 (`examples/*.sample.json`)
+- CI 스크립트: JSON Schema + Zod + 샘플 양방향 검증
+
+### 완료 조건 (DoD)
+
+- [ ] `schemas/` 11개 모두 `additionalProperties: false` 또는 명시적 허용으로 정리
+- [ ] 모든 schema 파일에 최소 1개 이상 `examples/*.sample.json` 존재
+- [ ] `npm run schema:check`가 JSON Schema + Zod 둘 다 통과
+- [ ] ADR-006 일치 검증 스크립트 통과
+- [ ] `src/shared/schemas/`에 Zod 스키마 11개 존재
+- [ ] `src/shared/types.ts`가 Zod에서 `z.infer`로 도출되도록 갱신
 
 ## Phase 2 — 프로젝트와 테스트 데이터
 
