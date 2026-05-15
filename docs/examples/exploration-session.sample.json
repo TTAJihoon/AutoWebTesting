@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "0.3",
+  "explorationSessionId": "EXP_20260515_001",
+  "projectId": "PROJECT_USER_MANAGEMENT",
+  "targetUrl": "https://example.com/admin",
+  "goal": "사용자 관리 기능의 CRUD 흐름을 탐색하고 테스트케이스 후보를 생성한다.",
+  "mode": "AI_ASSISTED_EXPLORATION",
+  "status": "IN_PROGRESS"
+}

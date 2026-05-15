@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autowebtesting.local/schemas/test-data-profile.schema.json",
+  "title": "test-data-profile",
+  "type": "object",
+  "description": "초안 placeholder. 상세 필드는 다음 단계에서 확정한다.",
+  "properties": {
+    "schemaVersion": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schemaVersion"
+  ],
+  "additionalProperties": true
+}

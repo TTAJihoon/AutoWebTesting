@@ -2,7 +2,7 @@
 
 ## 상태
 
-- status: accepted
+- status: proposed
 - date: YYYY-MM-DD
 
 ## 배경

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "0.3",
+  "executionPlanId": "PLAN_TC_001_001",
+  "tcId": "TC_001-001",
+  "name": "사용자 등록 후 목록 표시 확인",
+  "startPageStateId": "PAGE_001",
+  "requiredPageStateIds": ["PAGE_001", "PAGE_002"],
+  "testDataProfileId": "PROFILE_DEFAULT",
+  "variablesUsed": ["UNIQUE_USER_ID", "USER_NAME"],
+  "riskSummary": {
+    "maxRiskLevel": "MEDIUM",
+    "riskFlags": [],
+    "requiresApproval": false
+  },
+  "planStatus": "READY",
+  "steps": []
+}
