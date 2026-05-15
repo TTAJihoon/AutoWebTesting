@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "0.3",
+  "projectId": "PROJECT_USER_MANAGEMENT",
+  "name": "사용자관리",
+  "folderName": "user-management",
+  "targetUrl": "https://example.com/admin",
+  "createdAt": "2026-05-15T09:00:00+09:00",
+  "lastOpenedAt": "2026-05-15T11:00:00+09:00",
+  "testDataProfileId": "PROFILE_DEFAULT",
+  "riskPolicyId": "RISK_DEFAULT",
+  "appVersion": "0.1.0",
+  "environmentType": "staging"
+}

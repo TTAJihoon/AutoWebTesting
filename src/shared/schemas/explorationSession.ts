@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   EXPLORATION_SESSION_ID_PATTERN,
+  EnvironmentTypeSchema,
   SchemaVersionSchema
 } from "./common.js";
 
@@ -19,13 +20,9 @@ export const LlmModeSchema = z.enum([
 ]);
 export type LlmMode = z.infer<typeof LlmModeSchema>;
 
-export const EnvironmentTypeSchema = z.enum([
-  "local",
-  "dev",
-  "staging",
-  "production"
-]);
-export type EnvironmentType = z.infer<typeof EnvironmentTypeSchema>;
+// EnvironmentTypeSchema re-exported via common.ts (single definition).
+export { EnvironmentTypeSchema };
+export type { EnvironmentType } from "./common.js";
 
 export const ExplorationSessionStatusSchema = z.enum([
   "IN_PROGRESS",

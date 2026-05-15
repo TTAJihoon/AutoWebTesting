@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autowebtesting.local/schemas/project.schema.json",
+  "title": "project",
+  "description": "프로젝트 메타정보. Documents/AutoWebTesting/projects/{projectName}/project.json 에 저장된다.",
+  "type": "object",
+  "required": ["schemaVersion", "projectId", "name", "createdAt"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "type": "string", "const": "0.3" },
+    "projectId": {
+      "type": "string",
+      "pattern": "^PROJECT_[A-Z0-9_]+$",
+      "description": "PROJECT_{대문자영숫자언더스코어} 형식"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "사용자가 입력한 한국어 프로젝트명. 파일시스템 폴더명은 sanitize된 버전 사용."
+    },
+    "folderName": {
+      "type": "string",
+      "description": "실제 파일시스템 폴더명 (Windows safe). 미지정 시 name에서 자동 도출."
+    },
+    "targetUrl": { "type": "string", "format": "uri" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "lastOpenedAt": { "type": "string", "format": "date-time" },
+    "testDataProfileId": { "type": "string" },
+    "riskPolicyId": { "type": "string" },
+    "appVersion": { "type": "string" },
+    "environmentType": {
+      "type": "string",
+      "enum": ["local", "dev", "staging", "production"]
+    }
+  }
+}

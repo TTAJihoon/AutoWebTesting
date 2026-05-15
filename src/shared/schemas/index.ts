@@ -2,6 +2,7 @@
 // See docs/decisions/ADR-006-schema-as-contract-zod-as-runtime.md
 
 export * from "./common.js";
+export * from "./project.js";
 export * from "./testcase.js";
 export * from "./pageState.js";
 export * from "./domSummary.js";
@@ -17,6 +18,7 @@ export * from "./testDataProfile.js";
 
 // Convenience map: name → { schema, sampleFile, jsonSchemaFile }
 // Used by scripts/validate-schemas.mjs for paired JSON-Schema + Zod + sample validation.
+import { ProjectSchema } from "./project.js";
 import { TestCasePayloadSchema } from "./testcase.js";
 import { PageStateSchema } from "./pageState.js";
 import { DomSummarySchema } from "./domSummary.js";
@@ -31,6 +33,7 @@ import { FailurePackageSchema } from "./failurePackage.js";
 import { TestDataProfileSchema } from "./testDataProfile.js";
 
 export const SCHEMA_REGISTRY = {
+  project: ProjectSchema,
   testcase: TestCasePayloadSchema,
   "page-state": PageStateSchema,
   "dom-summary": DomSummarySchema,

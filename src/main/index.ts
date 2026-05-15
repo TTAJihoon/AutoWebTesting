@@ -4,6 +4,14 @@ import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import { saveRunArtifacts, type SaveRunArtifactsRequest } from "./runArtifacts";
 import { executePlans, type ExecutePlansRequest } from "../runner/executor";
 import { captureDomSummary, type CaptureDomSummaryRequest } from "../runner/playwrightDomCapture";
+import {
+  createProject,
+  listProjects,
+  openProject,
+  type CreateProjectRequest,
+  type OpenProjectRequest
+} from "./projectStore";
+import { IpcChannel } from "../shared/ipcChannels";
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -37,21 +45,36 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window);
   });
 
-  ipcMain.handle("app:get-info", () => ({
+  ipcMain.handle(IpcChannel.AppGetInfo, () => ({
     name: "AutoWebTesting",
     version: app.getVersion(),
     platform: process.platform
   }));
 
-  ipcMain.handle("dom:capture-summary", async (_event, request: CaptureDomSummaryRequest) => {
+  // === Project (Phase 2) ===
+  ipcMain.handle(IpcChannel.ProjectCreate, async (_event, request: CreateProjectRequest) => {
+    return createProject(request);
+  });
+
+  ipcMain.handle(IpcChannel.ProjectList, async () => {
+    return listProjects();
+  });
+
+  ipcMain.handle(IpcChannel.ProjectOpen, async (_event, request: OpenProjectRequest) => {
+    return openProject(request);
+  });
+
+  // === DOM (existing) ===
+  ipcMain.handle(IpcChannel.DomCaptureSummary, async (_event, request: CaptureDomSummaryRequest) => {
     return captureDomSummary(request);
   });
 
-  ipcMain.handle("run:execute-plans", async (_event, request: ExecutePlansRequest) => {
+  // === Run (existing legacy channels) ===
+  ipcMain.handle(IpcChannel.RunExecutePlans, async (_event, request: ExecutePlansRequest) => {
     return executePlans(request);
   });
 
-  ipcMain.handle("run:save-artifacts", async (_event, request: SaveRunArtifactsRequest) => {
+  ipcMain.handle(IpcChannel.RunSaveArtifacts, async (_event, request: SaveRunArtifactsRequest) => {
     return saveRunArtifacts(request);
   });
 

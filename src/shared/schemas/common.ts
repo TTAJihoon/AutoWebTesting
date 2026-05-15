@@ -56,6 +56,14 @@ export const SourceModeSchema = z.enum([
 ]);
 export type SourceMode = z.infer<typeof SourceModeSchema>;
 
+export const EnvironmentTypeSchema = z.enum([
+  "local",
+  "dev",
+  "staging",
+  "production"
+]);
+export type EnvironmentType = z.infer<typeof EnvironmentTypeSchema>;
+
 // === Identifier regex patterns (mirror JSON Schema) ===
 
 export const TC_ID_PATTERN = /^TC_[0-9]{3}-[0-9]{3}$/;
