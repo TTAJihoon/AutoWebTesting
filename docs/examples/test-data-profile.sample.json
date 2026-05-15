@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "0.3",
+  "testDataProfileId": "PROFILE_DEFAULT",
+  "name": "기본 테스트 데이터",
+  "description": "MVP 기본 프로필. secret은 localCredentialStore에 저장. generated 변수로 등록 테스트 반복 가능.",
+  "variables": [
+    {
+      "name": "LOGIN_ID",
+      "type": "secret",
+      "valueSource": "localCredentialStore",
+      "sendToLlm": false,
+      "description": "관리자 로그인 ID"
+    },
+    {
+      "name": "LOGIN_PASSWORD",
+      "type": "secret",
+      "valueSource": "localCredentialStore",
+      "sendToLlm": false,
+      "description": "관리자 로그인 비밀번호"
+    },
+    {
+      "name": "UNIQUE_USER_ID",
+      "type": "generated",
+      "pattern": "autotest_${yyyyMMddHHmmss}",
+      "sendToLlm": true,
+      "description": "반복 실행 가능한 고유 사용자 ID"
+    },
+    {
+      "name": "USER_NAME",
+      "type": "testData",
+      "value": "자동테스트사용자",
+      "sendToLlm": true,
+      "description": "테스트용 사용자명"
+    },
+    {
+      "name": "UPLOAD_PROFILE_IMG",
+      "type": "file",
+      "filePath": "inputs/profile-sample.png",
+      "sendToLlm": false,
+      "description": "프로필 사진 업로드 테스트용 파일"
+    }
+  ]
+}

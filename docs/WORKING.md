@@ -1,20 +1,41 @@
 # AutoWebTesting 현재 작업 범위
 
-이 문서는 현재 대화 또는 현재 개발 작업에서 참조해야 할 문서와 수정 범위를 정의한다.
+## 현재 진행 상태
 
-## 현재 작업 목표
+**Phase 1 — 문서/스키마 기반 구조 확정** 진행 중 (≈80% 완료)
 
-AI 탐색 기반 AutoWebTesting 설계를 실제 구현 가능한 JSON Schema, TypeScript 타입, IPC 계약, Runner 구조로 구체화한다.
+### 완료
+- ✅ ADR-006: JSON Schema = 사람용 계약, Zod = 런타임/TS 원천 (CI로 일치 검증)
+- ✅ `docs/schemas/*.schema.json` 11개 모두 실제 필드 정의 (placeholder 교체)
+- ✅ `docs/examples/*.sample.json` 12개 (모든 schema에 1개 이상의 sample)
+- ✅ `src/shared/schemas/*.ts` 12개 Zod 스키마 + `index.ts` 작성
+- ✅ `scripts/validate-schemas.mjs` 보강: ajv + Zod 양쪽 검증, examples 양방향 매칭
+- ✅ `package.json`: `ajv`, `ajv-formats`, `tsx` 추가
+- ✅ Phase 0.5 마이그레이션 단계 추가 ([`design/15-phase-roadmap.md`](design/15-phase-roadmap.md))
 
-## 현재 작업 대상 문서
+### 남은 작업 (Phase 1 마무리)
+- ⬜ `npm install` 후 `npm run schema:check` 실제 통과 확인
+- ⬜ `npm run typecheck` 통과 확인 (신규 Zod 파일 컴파일 오류 0)
+- ⬜ 검증 실패 시 schema/sample 조정
+
+### 다음 작업 (Phase 0.5)
+- `src/shared/types.ts` 기존 타입 → `src/shared/legacy/types.ts`로 이동
+- 신규 모듈은 `src/shared/schemas/*` 사용, 기존 모듈은 legacy 사용 (단계 교체)
+- `src/runner/v2/` 또는 신규 네임스페이스로 마이그레이션 모듈 작성
+- IPC 채널 명칭 정리 (구버전 `run:execute-plans` → 신버전 `run:start` 등)
+
+---
+
+## 작업 대상 문서
 
 - `design/03-data-schema-overview.md`
 - `design/05-execution-plan.md`
 - `design/10-ipc-contract.md`
 - `design/11-runner-design.md`
 - `design/15-phase-roadmap.md`
+- `decisions/ADR-006-schema-as-contract-zod-as-runtime.md`
 
-## 참조할 수 있는 문서
+## 참조 문서
 
 - `design/02-ai-exploration.md`
 - `design/04-page-state-dom.md`
@@ -43,11 +64,4 @@ AI 탐색 기반 AutoWebTesting 설계를 실제 구현 가능한 JSON Schema, T
 8. Delete는 AutoWebTesting이 생성한 데이터에 대해서만 제한적으로 허용한다.
 9. SMS/메일/푸시 등 외부 발송은 HIGH로 보고 명시 승인 후 실행한다.
 10. P/F는 `executionStatus = COMPLETED`인 경우에만 부여한다.
-
-## 다음 작업
-
-1. JSON Schema 파일 목록과 필수 필드 확정
-2. TypeScript 타입 구조 작성
-3. IPC 계약 재정리
-4. Runner 실행 흐름 작성
-5. 샘플 JSON 세트 작성
+11. JSON Schema는 사람용 계약, Zod는 런타임/TS 원천. `schema:check`가 일치를 보장.

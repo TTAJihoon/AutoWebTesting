@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "0.3",
+  "failurePackageId": "FAIL_001",
+  "runId": "RUN-20260515-110000",
+  "tcId": "TC_001-001",
+  "executionPlanId": "PLAN_TC_001_001",
+  "failureType": "EXECUTION_FAILURE",
+  "executionStatus": "PAGE_STATE_MISMATCH",
+  "testResult": null,
+  "failedStep": {
+    "stepId": "STEP_003",
+    "stepType": "ACTION",
+    "action": "fill",
+    "expectedPageStateId": "PAGE_002",
+    "actualUrl": "https://example.com/admin/users",
+    "actualPageStateGuess": "사용자 목록 화면",
+    "message": "사용자 등록 화면에서 입력해야 하지만 현재 사용자 목록 화면으로 판단됨",
+    "playwrightError": "Target page state does not match expected PAGE_002"
+  },
+  "context": {
+    "currentUrl": "https://example.com/admin/users",
+    "pageTitle": "사용자 관리",
+    "visibleTexts": ["사용자 목록", "검색", "등록"],
+    "screenshotPath": "evidence/FAIL_001.png",
+    "domSummaryPath": "dom/dom-summary.PAGE_001.json",
+    "consoleErrors": [],
+    "networkErrors": [],
+    "previousStepResults": [
+      { "stepId": "STEP_001", "status": "PASSED", "message": "등록 버튼 클릭 완료" },
+      { "stepId": "STEP_002", "status": "FAILED", "message": "화면 전환 실패: PAGE_002로 이동하지 못함" }
+    ]
+  },
+  "riskCheckResult": {
+    "riskLevel": "LOW",
+    "riskFlags": [],
+    "requiresApproval": false
+  },
+  "testDataSnapshot": {
+    "USER_NAME": "자동테스트사용자",
+    "UNIQUE_USER_ID": "autotest_20260515110000",
+    "LOGIN_ID": "***MASKED***",
+    "LOGIN_PASSWORD": "***MASKED***"
+  },
+  "suggestedAnalysisPromptInput": true,
+  "generatedAt": "2026-05-15T11:02:00+09:00"
+}

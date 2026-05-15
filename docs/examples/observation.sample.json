@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "0.3",
+  "observationId": "OBS_001",
+  "explorationSessionId": "EXP_20260515_001",
+  "pageStateId": "PAGE_001",
+  "url": "https://example.com/admin/users",
+  "title": "사용자 관리",
+  "observationType": "TEXT_DOM_PRIMARY",
+  "pageStateGuess": {
+    "name": "사용자 목록 화면",
+    "confidence": 0.88,
+    "reason": "사용자 목록, 검색, 등록 버튼, 사용자 테이블이 확인됨"
+  },
+  "domSummaryId": "DOM_001",
+  "elementRegistryId": "REG_001",
+  "visibleTexts": ["사용자 목록", "검색", "등록", "사용자명", "상태"],
+  "forms": [
+    { "formId": "FORM_SEARCH", "label": "검색 조건", "fields": ["사용자명", "상태"] }
+  ],
+  "tables": [
+    { "tableId": "TABLE_USERS", "label": "사용자 목록 테이블", "columns": ["사용자명", "아이디", "상태", "관리"] }
+  ],
+  "screenshot": {
+    "available": true,
+    "path": "observations/OBS_001.masked.png",
+    "originalPath": "observations/OBS_001.original.png",
+    "sendToLlm": "OPTIONAL_ON_AMBIGUITY",
+    "maskingApplied": true,
+    "maskingRules": ["passwordFields", "emailLikeTexts"],
+    "reason": "DOM 구조 명확하지만 화면 배치 확인을 위해 캡처"
+  },
+  "previousActionResult": null,
+  "createdAt": "2026-05-15T10:01:00+09:00"
+}

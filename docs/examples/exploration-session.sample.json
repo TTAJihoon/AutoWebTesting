@@ -4,6 +4,33 @@
   "projectId": "PROJECT_USER_MANAGEMENT",
   "targetUrl": "https://example.com/admin",
   "goal": "사용자 관리 기능의 CRUD 흐름을 탐색하고 테스트케이스 후보를 생성한다.",
+  "inputSources": {
+    "featureList": true,
+    "manual": true,
+    "webShape": true
+  },
   "mode": "AI_ASSISTED_EXPLORATION",
-  "status": "IN_PROGRESS"
+  "llmMode": "GPT_WEB_IMPORT_OR_API_ADAPTER",
+  "environmentType": "staging",
+  "riskPolicyId": "RISK_DEFAULT",
+  "testDataProfileId": "PROFILE_DEFAULT",
+  "status": "IN_PROGRESS",
+  "limits": {
+    "maxSteps": 50,
+    "maxPageStates": 20,
+    "maxSameUrlVisits": 3,
+    "maxSameActionRepeats": 2,
+    "allowAutoExecuteHigh": false
+  },
+  "startedAt": "2026-05-15T10:00:00+09:00",
+  "endedAt": null,
+  "summary": {
+    "visitedPageStates": 0,
+    "candidateFeatures": 0,
+    "candidateCrudFlows": 0,
+    "blockedActions": 0,
+    "reviewRequiredItems": 0,
+    "totalActionsExecuted": 0,
+    "totalObservations": 0
+  }
 }

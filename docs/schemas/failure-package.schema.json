@@ -2,15 +2,114 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://autowebtesting.local/schemas/failure-package.schema.json",
   "title": "failure-package",
+  "description": "실패 분석을 위한 패키지. 실패 당시의 컨텍스트(테스트케이스, 실행계획, 실패 step, 화면 상태, 증적)를 포함한다. GPT 또는 LLM의 입력으로 사용한다.",
   "type": "object",
-  "description": "초안 placeholder. 상세 필드는 다음 단계에서 확정한다.",
-  "properties": {
-    "schemaVersion": {
-      "type": "string"
-    }
-  },
   "required": [
-    "schemaVersion"
+    "schemaVersion",
+    "failurePackageId",
+    "runId",
+    "tcId",
+    "executionPlanId",
+    "failureType",
+    "executionStatus",
+    "failedStep",
+    "context"
   ],
-  "additionalProperties": true
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "type": "string", "const": "0.3" },
+    "failurePackageId": {
+      "type": "string",
+      "pattern": "^FAIL_[0-9]{3,6}$"
+    },
+    "runId": { "type": "string" },
+    "tcId": { "type": "string", "pattern": "^TC_[0-9]{3}-[0-9]{3}$" },
+    "executionPlanId": { "type": "string", "pattern": "^PLAN_TC_[0-9]{3}_[0-9]{3}$" },
+    "failureType": {
+      "type": "string",
+      "enum": ["TEST_FAILURE", "EXECUTION_FAILURE", "RISK_BLOCKED", "MANUAL_REQUIRED"]
+    },
+    "executionStatus": {
+      "type": "string",
+      "enum": [
+        "BLOCKED",
+        "MAPPING_FAILED",
+        "PAGE_STATE_MISMATCH",
+        "NAVIGATION_FAILED",
+        "DIALOG_UNHANDLED",
+        "SCRIPT_FAILED",
+        "SKIPPED_RISK",
+        "MANUAL_REQUIRED",
+        "COMPLETED"
+      ]
+    },
+    "testResult": {
+      "type": ["string", "null"],
+      "enum": ["P", "F", "N/A", null]
+    },
+    "failedStep": {
+      "type": "object",
+      "required": ["stepId"],
+      "additionalProperties": false,
+      "properties": {
+        "stepId": { "type": "string" },
+        "stepType": { "type": "string" },
+        "action": { "type": "string" },
+        "expectedPageStateId": { "type": "string" },
+        "actualUrl": { "type": "string" },
+        "actualPageStateGuess": { "type": "string" },
+        "message": { "type": "string" },
+        "playwrightError": { "type": "string" }
+      }
+    },
+    "context": {
+      "type": "object",
+      "required": ["visibleTexts"],
+      "additionalProperties": false,
+      "properties": {
+        "currentUrl": { "type": "string" },
+        "pageTitle": { "type": "string" },
+        "visibleTexts": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "screenshotPath": { "type": "string" },
+        "domSummaryPath": { "type": "string" },
+        "consoleErrors": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "networkErrors": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "previousStepResults": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "stepId": { "type": "string" },
+              "status": { "type": "string" },
+              "message": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "riskCheckResult": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "testDataSnapshot": {
+      "type": "object",
+      "description": "secret 변수는 마스킹된 상태로만 포함",
+      "additionalProperties": true
+    },
+    "suggestedAnalysisPromptInput": {
+      "type": "boolean",
+      "description": "이 패키지를 그대로 GPT 실패분석 프롬프트에 전달 가능한지 표시"
+    },
+    "generatedAt": { "type": "string", "format": "date-time" }
+  }
 }

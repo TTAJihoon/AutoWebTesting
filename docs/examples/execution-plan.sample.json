@@ -2,16 +2,114 @@
   "schemaVersion": "0.3",
   "executionPlanId": "PLAN_TC_001_001",
   "tcId": "TC_001-001",
+  "source": {
+    "explorationSessionId": "EXP_20260515_001",
+    "candidateCrudFlowId": "CRUD_001",
+    "generatedBy": "AI_EXPLORATION",
+    "reviewedByHuman": true
+  },
   "name": "사용자 등록 후 목록 표시 확인",
+  "description": "사용자 목록 화면에서 신규 사용자를 등록하고 목록 테이블에 표시되는지 확인한다.",
   "startPageStateId": "PAGE_001",
   "requiredPageStateIds": ["PAGE_001", "PAGE_002"],
   "testDataProfileId": "PROFILE_DEFAULT",
   "variablesUsed": ["UNIQUE_USER_ID", "USER_NAME"],
   "riskSummary": {
+    "riskLevel": "MEDIUM",
     "maxRiskLevel": "MEDIUM",
     "riskFlags": [],
     "requiresApproval": false
   },
   "planStatus": "READY",
-  "steps": []
+  "steps": [
+    {
+      "stepId": "STEP_001",
+      "stepType": "ACTION",
+      "pageStateId": "PAGE_001",
+      "action": "click",
+      "elementId": "PAGE_001.el_0001",
+      "description": "등록 버튼 클릭",
+      "expectedTransition": {
+        "type": "URL_CHANGE_OR_DOM_CHANGE",
+        "expectedNextPageStateId": "PAGE_002",
+        "urlPattern": "/users/new",
+        "requiredTexts": ["사용자 등록", "저장"],
+        "timeoutMs": 5000
+      },
+      "riskCheck": {
+        "riskLevel": "LOW",
+        "riskFlags": [],
+        "requiresApproval": false
+      }
+    },
+    {
+      "stepId": "STEP_002",
+      "stepType": "ACTION",
+      "pageStateId": "PAGE_002",
+      "action": "fill",
+      "elementId": "PAGE_002.el_0010",
+      "valueSource": "UNIQUE_USER_ID",
+      "description": "사용자 ID 입력",
+      "riskCheck": {
+        "riskLevel": "LOW",
+        "riskFlags": [],
+        "requiresApproval": false
+      }
+    },
+    {
+      "stepId": "STEP_003",
+      "stepType": "ACTION",
+      "pageStateId": "PAGE_002",
+      "action": "fill",
+      "elementId": "PAGE_002.el_0011",
+      "valueSource": "USER_NAME",
+      "description": "사용자명 입력",
+      "riskCheck": {
+        "riskLevel": "LOW",
+        "riskFlags": [],
+        "requiresApproval": false
+      }
+    },
+    {
+      "stepId": "STEP_004",
+      "stepType": "ACTION",
+      "pageStateId": "PAGE_002",
+      "action": "click",
+      "elementId": "PAGE_002.el_0020",
+      "description": "저장 버튼 클릭",
+      "expectedTransition": {
+        "type": "URL_CHANGE_OR_TEXT_APPEAR",
+        "expectedNextPageStateId": "PAGE_001",
+        "urlPattern": "/users",
+        "requiredTexts": ["저장되었습니다"],
+        "timeoutMs": 5000
+      },
+      "riskCheck": {
+        "riskLevel": "MEDIUM",
+        "riskFlags": [],
+        "requiresApproval": false
+      }
+    },
+    {
+      "stepId": "ASSERT_001",
+      "stepType": "ASSERTION",
+      "pageStateId": "PAGE_001",
+      "assertion": "assertRowContains",
+      "tableId": "TABLE_USERS",
+      "expectedValueSource": "USER_NAME",
+      "description": "사용자 목록 테이블에 신규 사용자명이 표시되는지 확인"
+    }
+  ],
+  "cleanupPlan": {
+    "policy": "AUTO_CLEANUP_APPROVAL_REQUIRED",
+    "items": [
+      {
+        "cleanupId": "CLEANUP_001",
+        "entityType": "USER",
+        "matchValueSource": "UNIQUE_USER_ID",
+        "strategy": "DELETE_CREATED_ROW",
+        "requiresApproval": true
+      }
+    ]
+  }
 }

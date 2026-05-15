@@ -2,15 +2,82 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://autowebtesting.local/schemas/test-data-profile.schema.json",
   "title": "test-data-profile",
+  "description": "테스트 데이터 변수 묶음. secret(민감), testData(일반), generated(고유값), file(업로드) 유형으로 구분한다. secret은 LLM에 전달하지 않는다.",
   "type": "object",
-  "description": "초안 placeholder. 상세 필드는 다음 단계에서 확정한다.",
+  "required": ["schemaVersion", "testDataProfileId", "name", "variables"],
+  "additionalProperties": false,
   "properties": {
-    "schemaVersion": {
-      "type": "string"
+    "schemaVersion": { "type": "string", "const": "0.3" },
+    "testDataProfileId": { "type": "string", "minLength": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "variables": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/variable" }
     }
   },
-  "required": [
-    "schemaVersion"
-  ],
-  "additionalProperties": true
+  "$defs": {
+    "variable": {
+      "type": "object",
+      "required": ["name", "type", "sendToLlm"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "description": "대문자 영숫자 + 언더스코어. 예: LOGIN_ID, USER_NAME"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["secret", "testData", "generated", "file"]
+        },
+        "valueSource": {
+          "type": "string",
+          "enum": ["localCredentialStore", "osKeychain", "envVar", "userInput", "literal"],
+          "description": "type=secret일 때 실제 값 출처. literal일 경우 value 필드 사용"
+        },
+        "value": {
+          "type": "string",
+          "description": "type=testData일 때 또는 valueSource=literal일 때 사용. type=secret이면 사용 금지."
+        },
+        "pattern": {
+          "type": "string",
+          "description": "type=generated일 때 사용. 지원 토큰: ${yyyyMMddHHmmss}, ${timestamp}, ${random6}, ${random10}, ${uuid}"
+        },
+        "filePath": {
+          "type": "string",
+          "description": "type=file일 때 업로드 대상 파일 경로"
+        },
+        "sendToLlm": {
+          "type": "boolean",
+          "description": "LLM 프롬프트에 변수 값을 전달해도 되는지. secret은 반드시 false."
+        },
+        "description": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "secret" } } },
+          "then": {
+            "required": ["valueSource"],
+            "properties": {
+              "sendToLlm": { "const": false }
+            },
+            "not": { "required": ["value"] }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "testData" } } },
+          "then": { "required": ["value"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "generated" } } },
+          "then": { "required": ["pattern"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "file" } } },
+          "then": { "required": ["filePath"] }
+        }
+      ]
+    }
+  }
 }

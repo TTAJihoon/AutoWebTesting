@@ -1,0 +1,42 @@
+{
+  "schemaVersion": "0.3",
+  "elementRegistryId": "REG_001",
+  "pageStateId": "PAGE_001",
+  "createdAt": "2026-05-15T10:00:00+09:00",
+  "items": [
+    {
+      "elementId": "PAGE_001.el_0001",
+      "selectorCandidates": [
+        { "type": "testId", "value": "[data-testid='create-user']", "priority": 1, "confidence": 0.95 },
+        { "type": "role", "value": "button[name='등록']", "priority": 2, "confidence": 0.9 },
+        { "type": "text", "value": "button:has-text('등록')", "priority": 3, "confidence": 0.8 }
+      ],
+      "stableHints": {
+        "role": "button",
+        "label": "등록",
+        "text": "등록",
+        "placeholder": null,
+        "nearbyText": "사용자 목록",
+        "formId": null,
+        "region": "toolbar"
+      },
+      "lastKnownBounds": { "x": 812, "y": 140, "width": 80, "height": 36 }
+    },
+    {
+      "elementId": "PAGE_001.el_0002",
+      "selectorCandidates": [
+        { "type": "label", "value": "input[aria-label='사용자명']", "priority": 1, "confidence": 0.92 },
+        { "type": "placeholder", "value": "input[placeholder='사용자명을 입력하세요']", "priority": 2, "confidence": 0.85 }
+      ],
+      "stableHints": {
+        "role": "textbox",
+        "label": "사용자명",
+        "text": null,
+        "placeholder": "사용자명을 입력하세요",
+        "nearbyText": "검색 조건",
+        "formId": "FORM_SEARCH",
+        "region": "search"
+      }
+    }
+  ]
+}

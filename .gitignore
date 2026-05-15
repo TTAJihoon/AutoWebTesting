@@ -17,3 +17,5 @@ evidence/
 !.env.example
 
 *.tsbuildinfo
+
+.claude/worktrees/

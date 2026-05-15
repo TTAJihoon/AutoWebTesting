@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "0.3",
+  "riskPolicyId": "RISK_DEFAULT",
+  "name": "기본 리스크 정책",
+  "description": "MVP 기본 정책. 한국어 키워드 사전 + 3단계 통제 + Delete 제한",
+  "riskKeywords": {
+    "PAYMENT": ["결제", "주문확정", "카드승인", "청구", "입금", "정산"],
+    "DELETE_DATA": ["삭제", "영구삭제", "제거", "탈퇴", "초기화", "폐기"],
+    "SEND_EXTERNAL_MESSAGE": ["발송", "문자", "SMS", "메일", "이메일", "알림톡", "푸시"],
+    "SUBMIT_TO_EXTERNAL_SYSTEM": ["제출", "신고", "전송"],
+    "DOWNLOAD_SENSITIVE_DATA": ["다운로드", "내보내기", "엑셀 다운"],
+    "CHANGE_PERMISSION": ["권한", "관리자", "역할 변경", "승인자 변경"],
+    "CHANGE_SECURITY_SETTING": ["비밀번호 정책", "MFA", "2단계 인증", "접근제어", "보안설정"],
+    "PUBLIC_PUBLISH": ["게시", "공개", "배포", "발행"],
+    "IRREVERSIBLE_ACTION": ["영구", "복구불가", "되돌릴 수 없"],
+    "LEGAL_OR_FINANCIAL_ACTION": ["계약", "세금계산서", "정산", "약정"]
+  },
+  "elevationRules": [
+    {
+      "from": "LOW",
+      "to": "MEDIUM",
+      "trigger": "ANY_RISK_KEYWORD",
+      "description": "LOW 단계에서 위험 키워드 발견 시 MEDIUM으로 상향"
+    },
+    {
+      "from": "MEDIUM",
+      "to": "HIGH",
+      "trigger": "HIGH_RISK_KEYWORD",
+      "description": "MEDIUM 단계에서 고위험 키워드 발견 시 HIGH로 상향"
+    },
+    {
+      "from": "HIGH",
+      "to": "PROHIBITED",
+      "trigger": "PROHIBITED_KEYWORD",
+      "description": "HIGH 단계에서 PROHIBITED 키워드 발견 시 차단"
+    }
+  ],
+  "defaults": {
+    "lowExecution": "AUTO",
+    "mediumExecution": "WARN_BEFORE",
+    "highExecution": "APPROVAL_REQUIRED",
+    "prohibitedExecution": "BLOCKED",
+    "defaultApprovalScope": "PER_RUN"
+  },
+  "deletePolicy": {
+    "onlyCreatedData": true,
+    "defaultRiskLevel": "HIGH"
+  }
+}

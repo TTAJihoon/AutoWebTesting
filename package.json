@@ -10,11 +10,13 @@
     "build": "tsc --noEmit && electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit",
-    "schema:check": "node scripts/validate-schemas.mjs"
+    "schema:check": "tsx scripts/validate-schemas.mjs"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
     "better-sqlite3": "^12.4.1",
     "exceljs": "^4.4.0",
     "playwright": "^1.56.1",
@@ -24,6 +26,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.10.0",
+    "tsx": "^4.19.2",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "@vitejs/plugin-react": "^5.0.4",

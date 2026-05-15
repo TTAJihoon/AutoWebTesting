@@ -1,0 +1,79 @@
+{
+  "schemaVersion": "0.3",
+  "domSummaryId": "DOM_001",
+  "pageStateId": "PAGE_001",
+  "url": "https://example.com/users",
+  "title": "사용자 관리",
+  "capturedAt": "2026-05-15T10:00:00+09:00",
+  "limits": { "maxElements": 250, "maxVisibleTexts": 80 },
+  "elements": [
+    {
+      "elementId": "PAGE_001.el_0001",
+      "role": "button",
+      "tag": "button",
+      "type": null,
+      "label": "등록",
+      "text": "등록",
+      "placeholder": null,
+      "name": null,
+      "required": false,
+      "visible": true,
+      "enabled": true,
+      "nearbyText": "사용자 목록",
+      "formId": null,
+      "region": "toolbar"
+    },
+    {
+      "elementId": "PAGE_001.el_0002",
+      "role": "textbox",
+      "tag": "input",
+      "type": "text",
+      "label": "사용자명",
+      "text": null,
+      "placeholder": "사용자명을 입력하세요",
+      "name": "username",
+      "required": false,
+      "visible": true,
+      "enabled": true,
+      "nearbyText": "검색 조건",
+      "formId": "FORM_SEARCH",
+      "region": "search"
+    },
+    {
+      "elementId": "PAGE_001.el_0020",
+      "role": "table",
+      "tag": "table",
+      "type": null,
+      "label": null,
+      "text": null,
+      "placeholder": null,
+      "name": null,
+      "required": false,
+      "visible": true,
+      "enabled": true,
+      "nearbyText": null,
+      "formId": null,
+      "region": "table"
+    }
+  ],
+  "visibleTexts": ["사용자 목록", "검색", "등록", "사용자명", "아이디", "상태", "관리"],
+  "forms": [
+    {
+      "formId": "FORM_SEARCH",
+      "name": "검색 조건",
+      "elementIds": ["PAGE_001.el_0002"]
+    }
+  ],
+  "tables": [
+    {
+      "tableId": "TABLE_USERS",
+      "label": "사용자 목록 테이블",
+      "elementId": "PAGE_001.el_0020",
+      "columns": ["사용자명", "아이디", "상태", "관리"],
+      "rowActionCandidates": [
+        { "actionText": "수정", "column": "관리", "riskLevel": "MEDIUM" },
+        { "actionText": "삭제", "column": "관리", "riskLevel": "HIGH", "riskFlags": ["DELETE_DATA"] }
+      ]
+    }
+  ]
+}

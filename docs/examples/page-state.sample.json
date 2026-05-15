@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "0.3",
+  "pageStateId": "PAGE_001",
+  "name": "사용자 목록 화면",
+  "description": "사용자 검색, 등록 버튼, 사용자 목록 테이블이 표시되는 화면",
+  "url": "https://example.com/users",
+  "urlPattern": "/users",
+  "title": "사용자 관리",
+  "stateType": "PAGE",
+  "identityHints": {
+    "requiredTexts": ["사용자 목록", "검색", "등록"],
+    "requiredElementIds": ["PAGE_001.el_0001"],
+    "optionalTexts": ["전체", "사용자명"]
+  },
+  "domSummaryId": "DOM_001",
+  "elementRegistryId": "REG_001",
+  "capturedAt": "2026-05-15T10:00:00+09:00"
+}
