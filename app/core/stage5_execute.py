@@ -4,6 +4,7 @@ import time
 from typing import Callable
 
 from playwright.sync_api import sync_playwright, Page, expect
+from app.validation.v6_selector_stability import annotate as v6_annotate, format_report as v6_format
 
 
 def execute(
@@ -38,6 +39,10 @@ def execute(
     not_run = [tc for tc in tcs if tc.get("review_status") not in ("approved", "edited")]
     for tc in not_run:
         tc["result"] = "not_executed"
+
+    # V6: 선택자 안정성 점수 + 실패 분류 보정
+    tcs, v6_report = v6_annotate(tcs, overwrite_exec_confidence=True)
+    _cb(v6_format(v6_report))
 
     _cb(f"Stage 5 완료")
     return tcs
