@@ -4,7 +4,7 @@
 
 ---
 
-## 1. 지금 어디까지 했나 (Last updated: 2026-05-19)
+## 1. 지금 어디까지 했나 (Last updated: 2026-05-20)
 
 ### ✅ 완료
 - **설계 동결** — `doc/` 7개 문서 작성 완료 (D1~D43 확정)
@@ -50,7 +50,38 @@
 - **PostgreSQL 미설치** → `winget install PostgreSQL.PostgreSQL.17` 필요 (GUI 앱 실행 시)
 - Stage 5~7은 Docker + gnuboard5 설치 후 가능
 
+### ✅ 자산 저장소 (Asset Store) 구현 완료 (2026-05-20)
+
+외부 검토 그룹 제안서(`proposal-for-awt-claude/`) 분석 후 채택·구현:
+
+| 구성 요소 | 파일 | 상태 |
+|---|---|---|
+| 결함 카탈로그 (PoC-γ 시드 5건) | `data/assets/defect-catalog/BOARD_CMS/` | ✅ |
+| 도메인 불변규칙 YAML | `data/assets/domain-invariants/BOARD_CMS.yaml` (8건) | ✅ |
+| 도메인 불변규칙 YAML | `data/assets/domain-invariants/USER_AUTH.yaml` (4건) | ✅ |
+| 제품 유형 분류기 | `app/assets/product_types.py` (7종) | ✅ |
+| 불변규칙 로더 | `app/assets/invariants_loader.py` | ✅ |
+| 결함 카탈로그 API | `app/assets/defect_catalog.py` | ✅ |
+| PATTERN_EXTRACT Contract | `prompts/pattern_extract.md` (5번째 LLM Contract) | ✅ |
+| TC_DESIGN v2 업그레이드 | `prompts/tc_design.md` → invariants + past_defects 주입 | ✅ |
+| Stage 2 자산 주입 | `app/core/stage2_tc_design.py` | ✅ |
+| Stage 3 V2·V3 3단계 출처 | `app/core/stage3_verify.py` (MANUAL/INVARIANT/INFERRED) | ✅ |
+| 자산 이벤트 로그 DB | `app/auth/db_client.py` → `awt_asset_events` 테이블 | ✅ |
+
+Mock 파이프라인 재검증 결과 (2026-05-20):
+- TC 79개 생성, V1~V5 모두 PASS (1회차)
+- **INFERRED 0%** (목표 <30% 대비 최상)
+- source_quote 분포: **MANUAL 92.4% / INVARIANT 7.6% / INFERRED 0%**
+
+핵심 설계 결정:
+- D38 Stateless = "API 호출 간 대화 기록 없음" (파일 자산과 별개)
+- 3단계 source_quote: INVARIANT 출처는 V3 INFERRED 비율에서 제외
+- patternProposal은 AI 자동 생성 → 검수자가 승인/거절만 (30초)
+- 제품 유형별 별도 YAML 파일 (`BOARD_CMS.yaml`, `USER_AUTH.yaml` 등)
+- 추적성: 파일 `_meta` 블록 + PostgreSQL `awt_asset_events` 테이블
+
 ### ⏸ 다음 예정
+- **V6 선택자 안정성 점수** `app/validation/v6_selector_stability.py` (Day 3)
 - **Phase 2** — 그누보드5 실전 AWT 실행 (Stage 0~7 end-to-end)
 
 ---
