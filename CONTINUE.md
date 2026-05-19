@@ -80,8 +80,22 @@ Mock 파이프라인 재검증 결과 (2026-05-20):
 - 제품 유형별 별도 YAML 파일 (`BOARD_CMS.yaml`, `USER_AUTH.yaml` 등)
 - 추적성: 파일 `_meta` 블록 + PostgreSQL `awt_asset_events` 테이블
 
+### ✅ V6 선택자 안정성 점수 구현 완료 (2026-05-20)
+
+| 파일 | 내용 |
+|---|---|
+| `app/validation/v6_selector_stability.py` | 선택자 9계층 점수 + oracle 명료성 + 실패 분류 |
+| `app/core/stage5_execute.py` | Stage 5 완료 후 v6_annotate() 자동 연동 |
+| `tests/test_v6_selector_stability.py` | 단위 테스트 36개 전체 PASS |
+
+기능 요약:
+- `selector_stability_score`: text_exact(0.92) > data_testid(0.88) > url(0.82) > id(0.78) > class(0.62) > xpath(0.32)
+- `oracle_clarity_score`: 기대 결과 검증 가능성 (인용문 +0.20, 추상표현 -0.15)
+- `classify_failure`: `selector_unstable` | `oracle_mismatch` | `app_defect` | `blocked`
+- `exec_confidence`: stability×0.50 + clarity×0.35 + retry_penalty×0.15
+- XPath 오분류 방지 3중 필터 (부정형 후방탐색, HTML태그 차단목록, XPath 부분문자열 검사)
+
 ### ⏸ 다음 예정
-- **V6 선택자 안정성 점수** `app/validation/v6_selector_stability.py` (Day 3)
 - **Phase 2** — 그누보드5 실전 AWT 실행 (Stage 0~7 end-to-end)
 
 ---
