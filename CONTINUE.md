@@ -9,32 +9,79 @@
 ### ✅ 완료
 - **설계 동결** — `doc/` 7개 문서 작성 완료 (D1~D43 확정)
 - **PoC-α** — Stage 1~3 시뮬레이션, TC 41개 산출
-  - 결과: V1·V4·V5 PASS / V2(58.5%)·V3(INFERRED 41.5%) 부분 PASS
-  - 분석: `data/poc/2026-05-19/output/analysis.md`
-  - 산출: `data/poc/2026-05-19/output/tc_review.xlsx`
+- **PoC-β** — Reviewer Gate 검토 완료, approved 41/41, PASS
+- **PoC-γ** — 자동 실행 41/41, PASS 32 / FAIL 9 (BUG-1~5 검출), PASS
+- **Q-INFRA-1~3 결정** — D44(PostgreSQL) D45(PySide6) D46(Inno Setup)
 
-### ⏳ 진행 중
-- **PoC-β** — `tc_review.xlsx` 사용자 검토 대기
-  - TC 41개에 A/E/R/P 결정 + 검토 노트
-  - 가이드: `data/poc/2026-05-19/HOW-TO-REVIEW.md`
+### ✅ Phase 1 완료 (2026-05-19)
+
+| 태스크 | 파일 | 상태 |
+|---|---|---|
+| T1: 스캐폴드 | `requirements.txt`, 디렉터리 구조 | ✅ |
+| T2: Prompts | `prompts/dom_spec.md` 외 3종 | ✅ |
+| T3: config + tools | `app/config/`, `app/tools/` | ✅ |
+| T4: api | `app/api/llm_client.py`, `call_contracts.py` | ✅ |
+| T5: core | `app/core/stage0~7.py`, `orchestrator.py` | ✅ |
+| T6: auth | `app/auth/db_client.py`, `admin_cli.py` | ✅ |
+| T7: UI | `app/ui/` 5개 창 (PySide6) | ✅ |
+| T8: main + installer | `app/main.py`, `installer/` | ✅ |
+
+### ✅ Q-PROD-1 해소 + Phase 2 환경 준비 완료 (2026-05-19)
+- **D47: 그누보드5 선정** — [gnuboard/gnuboard5](https://github.com/gnuboard/gnuboard5)
+- Docker Compose: `data/oss/gnuboard5/docker-compose.yml`
+- 기능 명세서: `data/oss/gnuboard5/manual/gnuboard5_spec.md` (Stage 1 입력)
+- 원클릭 셋업: `data/oss/gnuboard5/setup.ps1`
+- 실행 스크립트: `scripts/run_stage123.py` (Docker 없이 Stage 1~3 가능)
+- 실행 스크립트: `scripts/run_full_pipeline.py` (Stage 0~7 CLI)
+- 환경 재현 가이드: `SETUP.md` (다른 PC에서 이 파일 먼저 읽기)
+- 의존성 동결: `requirements.lock` (pip freeze 결과)
+- Python 의존성: 모두 설치 완료 (이 PC)
+- Playwright Chromium: 설치 완료 (이 PC)
+
+### ✅ Mock 파이프라인 실행 완료 (2026-05-19)
+- `python scripts\run_stage123_mock.py` 성공
+- TC 79개 / V1~V5 모두 PASS (1회) / INFERRED 0% / 0.1초
+- 기법: happy_path 23 / negative_basic 28 / equivalence 17 / boundary 9 / state_transition 2
+- 산출물: `data/runs/822c7f56/` (tc_verified.json, tc_review.xlsx)
+- 버그 수정: `stage2_tc_design.py` — expected_output→expected, technique→design_technique 필드 정규화
+
+### ⚠ 이 PC에서 남은 작업
+- **Docker Desktop 미설치** → `winget install Docker.DockerDesktop` 후 재부팅 필요
+- **PostgreSQL 미설치** → `winget install PostgreSQL.PostgreSQL.17` 필요 (GUI 앱 실행 시)
+- Stage 5~7은 Docker + gnuboard5 설치 후 가능
 
 ### ⏸ 다음 예정
-- **PoC-γ** — β 통과 후 Playwright MCP 자동 실행
-- **Phase 1 (Desktop App)** — PoC γ 통과 후 본 개발 진입
+- **Phase 2** — 그누보드5 실전 AWT 실행 (Stage 0~7 end-to-end)
 
 ---
 
 ## 2. 다음 행동
 
-PoC-β를 *이 PC*에서 이어가려면:
+**→ 새 PC라면 `SETUP.md`를 먼저 읽어라.**
 
+Phase 2 실행 순서:
+
+```powershell
+# 옵션 A: Stage 1~3만 (Docker 없이, API key만 필요)
+set ANTHROPIC_API_KEY=sk-ant-...
+python scripts\run_stage123.py
+
+# 옵션 B: Stage 0~7 전체 (Docker + 그누보드5 설치 필요)
+.\data\oss\gnuboard5\setup.ps1          # 그누보드5 Docker 셋업
+# → http://localhost:8080/install 에서 초기 설치
+set ANTHROPIC_API_KEY=sk-ant-...
+python scripts\run_full_pipeline.py `
+    --url http://localhost:8080 `
+    --manual data\oss\gnuboard5\manual\gnuboard5_spec.md `
+    --auth-id admin --auth-pw <비밀번호>
+
+# 옵션 C: GUI 앱 (PostgreSQL + Docker 모두 필요)
+python -m app.auth.admin_cli init       # 최초 1회
+python -m app.auth.admin_cli create-user
+python app\main.py
 ```
-1. doc/README.md 읽기 (5분) — 전체 구조 파악
-2. doc/05-poc-plan.md 읽기 (10분) — PoC 계획 + 현재 상태
-3. data/poc/2026-05-19/HOW-TO-REVIEW.md 읽기 (3분) — β 진행 방법
-4. data/poc/2026-05-19/output/tc_review.xlsx 열기 → 검토
-5. 결과를 data/poc/2026-05-19/result.md 에 기록
-```
+
+**추천 지금 당장: 옵션 A** — API key만 있으면 Stage 1~3 TC 설계 결과 확인 가능
 
 ---
 
@@ -74,7 +121,9 @@ PoC-β를 *이 PC*에서 이어가려면:
 | **어떻게 (PoC)** | Claude Code 환경에서 prompt 품질 검증 | D25 (PoC 한정) |
 | **어떻게 (프로덕션)** | Python Windows 데스크탑 앱 (.exe) | **D37** ← 최신 |
 | **LLM** | Anthropic API stateless 호출, 정형화 Call Contract | D38·D41 |
-| **인증** | 중앙 DB 서버, 처리는 로컬 | D40 |
+| **인증** | 중앙 DB 서버(PostgreSQL), 처리는 로컬 | D40·**D44** |
+| **UI** | PySide6 (LGPL, Qt6 공식) | **D45** |
+| **설치** | Inno Setup + PyInstaller | **D46** |
 
 상세는 `doc/06-decisions.md` 참조.
 
@@ -96,13 +145,30 @@ python tools/build_tc_review_xlsx.py
 # → data/poc/2026-05-19/output/tc_review.xlsx 갱신
 ```
 
-### 5.2. Phase 1 환경 (미래, 아직 구현 안 됨)
+### 5.2. Phase 1 환경 (구현 완료)
 
 ```bash
-# (예정)
+# PostgreSQL DB 초기화 (최초 1회)
+psql -U postgres -f installer/db_init.sql
+python -m app.auth.admin_cli init
+python -m app.auth.admin_cli create-user   # admin 계정 생성
+
+# 앱 실행
 pip install -r requirements.txt
 playwright install chromium
 python app/main.py
+
+# Windows .exe 빌드 (Inno Setup 설치 필요)
+.\installer\build.ps1
+```
+
+환경변수 (`.env` 또는 시스템):
+```
+AWT_DB_HOST=localhost
+AWT_DB_PORT=5432
+AWT_DB_NAME=awt
+AWT_DB_USER=awt_user
+AWT_DB_PASSWORD=changeme
 ```
 
 ---
@@ -114,7 +180,8 @@ python app/main.py
 | PoC mockup | 미니 게시판 HTML + 합성 매뉴얼 | `data/poc/2026-05-19/sample-board/` |
 | PoC-α 산출 | TC 41개 (CSV/Excel/MD) | `data/poc/2026-05-19/output/` |
 | PoC-β 진행 | 사용자 검토 결과 | `data/poc/2026-05-19/result.md` (직접 작성) |
-| Phase 1 산출 | 데스크탑 앱 .exe | `app/` (미생성) |
+| Phase 1 산출 | 데스크탑 앱 소스 | `app/` (완성) |
+| Phase 1 인스톨러 | Inno Setup .iss + PyInstaller .spec | `installer/` |
 
 ---
 

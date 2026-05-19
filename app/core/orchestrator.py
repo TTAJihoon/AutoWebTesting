@@ -1,0 +1,174 @@
+"""Stage 0~7 파이프라인 흐름 제어 (D43)."""
+from __future__ import annotations
+import uuid
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Callable
+
+from app.api.llm_client import LLMClient
+from app.core import (
+    stage0_dom_scan,
+    stage1_ingest,
+    stage2_tc_design,
+    stage3_verify,
+    stage5_execute,
+    stage6_enhance,
+    stage7_output,
+)
+from app.tools.excel_builder import build_review
+
+RUNS_DIR = Path("data/runs")
+
+
+@dataclass
+class RunConfig:
+    api_key: str
+    target_url: str
+    input_files: list[str] = field(default_factory=list)
+    auth_sequence: list[dict] = field(default_factory=list)
+    run_id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
+    inferred_threshold: float = 0.30
+
+
+class Orchestrator:
+    """AWT Stage 0~7 실행 제어."""
+
+    def __init__(self, config: RunConfig, progress_cb: Callable[[str], None] | None = None):
+        self.config = config
+        self._cb = progress_cb or (lambda msg: None)
+        self.run_dir = RUNS_DIR / config.run_id
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.llm = LLMClient(api_key=config.api_key, run_id=config.run_id)
+        self.tcs: list[dict] = []
+        self.ingest_result: dict = {}
+        self._stage = 0
+
+    # ── Stage 0 ──────────────────────────────────────────────────────────
+    def run_stage0(self) -> dict:
+        self._cb("▶ Stage 0: DOM 스캔")
+        result = stage0_dom_scan.scan(
+            url=self.config.target_url,
+            llm_client=self.llm,
+            run_dir=self.run_dir,
+            auth_sequence=self.config.auth_sequence or None,
+            progress_cb=self._cb,
+        )
+        self._stage = 0
+        return result
+
+    # ── Stage 1 ──────────────────────────────────────────────────────────
+    def run_stage1(self, feature_spec: dict | None = None) -> dict:
+        self._cb("▶ Stage 1: 파일 파싱·정규화")
+        self.ingest_result = stage1_ingest.ingest(
+            files=self.config.input_files,
+            run_dir=self.run_dir,
+            feature_spec=feature_spec,
+            progress_cb=self._cb,
+        )
+        self._stage = 1
+        return self.ingest_result
+
+    # ── Stage 2 ──────────────────────────────────────────────────────────
+    def run_stage2(self) -> list[dict]:
+        self._cb("▶ Stage 2: TC 설계")
+        self.tcs = stage2_tc_design.design(
+            leaves=self.ingest_result["leaves"],
+            manual_text=self.ingest_result["manual_text"],
+            llm_client=self.llm,
+            progress_cb=self._cb,
+        )
+        self._save_intermediate("tc_raw")
+        self._stage = 2
+        return self.tcs
+
+    # ── Stage 3 ──────────────────────────────────────────────────────────
+    def run_stage3(self) -> list[dict]:
+        self._cb("▶ Stage 3: V1~V5 검증")
+        self.tcs = stage3_verify.verify(
+            tcs=self.tcs,
+            manual_text=self.ingest_result["manual_text"],
+            llm_client=self.llm,
+            leaves=self.ingest_result["leaves"],
+            inferred_threshold=self.config.inferred_threshold,
+            progress_cb=self._cb,
+        )
+        self._save_intermediate("tc_verified")
+        # Reviewer Gate용 Excel 생성
+        build_review(self.tcs, self.run_dir / "tc_review.xlsx")
+        self._stage = 3
+        return self.tcs
+
+    # ── Stage 4 (UI) ─────────────────────────────────────────────────────
+    def apply_gate_decisions(self, decisions: dict[str, dict]) -> list[dict]:
+        """UI에서 받은 A/E/R/P 결정을 TC에 반영."""
+        self._cb("▶ Stage 4: Reviewer Gate 반영")
+        for tc in self.tcs:
+            d = decisions.get(tc["tc_id"])
+            if d:
+                tc["review_status"] = d.get("status", tc["review_status"])
+                tc["reviewer_note"] = d.get("note", "")
+                tc["reviewer_id"] = d.get("reviewer_id", "")
+        self._save_intermediate("tc_gated")
+        self._stage = 4
+        return self.tcs
+
+    # ── Stage 5 ──────────────────────────────────────────────────────────
+    def run_stage5(self) -> list[dict]:
+        self._cb("▶ Stage 5: Playwright 자동 실행")
+        self.tcs = stage5_execute.execute(
+            tcs=self.tcs,
+            base_url=self.config.target_url,
+            auth_sequence=self.config.auth_sequence or None,
+            progress_cb=self._cb,
+        )
+        self._save_intermediate("tc_executed")
+        self._stage = 5
+        return self.tcs
+
+    # ── Stage 6 ──────────────────────────────────────────────────────────
+    def run_stage6(self) -> list[dict]:
+        self._cb("▶ Stage 6: 실패 원인 분석")
+        self.tcs = stage6_enhance.enhance(
+            tcs=self.tcs,
+            llm_client=self.llm,
+            progress_cb=self._cb,
+        )
+        self._stage = 6
+        return self.tcs
+
+    # ── Stage 7 ──────────────────────────────────────────────────────────
+    def run_stage7(self) -> Path:
+        self._cb("▶ Stage 7: Excel 최종 산출")
+        out = stage7_output.output(
+            tcs=self.tcs,
+            run_dir=self.run_dir,
+            progress_cb=self._cb,
+        )
+        self._stage = 7
+        return out
+
+    # ── 편의 메서드 ─────────────────────────────────────────────────────
+    def run_pipeline(
+        self,
+        skip_stage0: bool = False,
+        gate_decisions: dict | None = None,
+    ) -> Path:
+        """Stage 0~7 전체 실행 (Stage 4 결정은 gate_decisions로 주입)."""
+        feature_spec = None
+        if not skip_stage0:
+            feature_spec = self.run_stage0()
+
+        self.run_stage1(feature_spec)
+        self.run_stage2()
+        self.run_stage3()
+        self.apply_gate_decisions(gate_decisions or {})
+        self.run_stage5()
+        self.run_stage6()
+        return self.run_stage7()
+
+    def _save_intermediate(self, name: str) -> None:
+        import json
+        path = self.run_dir / f"{name}.json"
+        path.write_text(
+            json.dumps(self.tcs, ensure_ascii=False, indent=2), encoding="utf-8"
+        )

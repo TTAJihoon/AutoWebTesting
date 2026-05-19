@@ -34,8 +34,9 @@ playwright-browsers/
 # Build artifacts (PyInstaller, Inno Setup)
 build/
 dist/
-*.spec
 installer/output/
+# Keep installer .spec (source file); only exclude PyInstaller intermediate cache
+*.spec.bak
 
 # Runtime data (per-run output, regenerable)
 data/runs/
