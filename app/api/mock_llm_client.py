@@ -25,6 +25,8 @@ class MockLLMClient:
             return self._dom_spec(inputs)
         if contract_id == "FAILURE_ANALYSIS":
             return self._failure_analysis(inputs)
+        if contract_id == "PATTERN_EXTRACT":
+            return self._pattern_extract(inputs)
         return {}
 
     # ── TC_DESIGN ────────────────────────────────────────────────────────
@@ -87,49 +89,88 @@ class MockLLMClient:
             "actual_output_summary": actual[:100] if actual else "페이지 내용 불일치",
             "difference": f"기대: {expected[:60]} / 실제: {actual[:60]}",
             "root_cause_candidates": ["UI 선택자 불일치", "비동기 로딩 타이밍", "권한 부족"],
+            "failure_category": "selector_break",  # selector_break|scenario_error|expected_error|true_defect|fictional_positive
             "retry_history": "없음",
             "exec_confidence": 0.5,
+        }
+
+    def _pattern_extract(self, inputs: dict) -> dict:
+        """PATTERN_EXTRACT Mock — 결함에서 패턴 제안 자동 생성 시뮬레이션."""
+        feature_type = inputs.get("feature_type", "OTHER")
+        defect_id = inputs.get("defect_id", "DEF-UNKNOWN")
+        return {
+            "patternProposal": {
+                "name": f"MOCK_PATTERN_{feature_type}",
+                "description": f"{feature_type} 기능에서 반복 발생하는 검증 누락 패턴",
+                "appliesTo": [feature_type, "UPDATE"] if feature_type != "UPDATE" else [feature_type],
+                "checks": [
+                    "정상 케이스 수행 후 상태 반영 확인",
+                    "비로그인 상태에서 해당 기능 접근 차단 확인",
+                    "필수 입력값 빈값 제출 시 오류 메시지 표시 확인",
+                ],
+                "confidence": 0.75,
+            },
+            "suggestedInvariant": {
+                "name": f"mock_invariant_{feature_type.lower()}",
+                "statement": f"{feature_type} 액션은 인증된 사용자만 실행 가능해야 한다",
+                "appliesTo": [feature_type],
+                "verification": f"{feature_type} 요청 시 세션 유효성 확인",
+            },
         }
 
 
 # ── 그누보드5 사전 정의 TC ────────────────────────────────────────────────
 
-_Q = {
-    # source_quote 약어 함수
-    "join":   "아이디, 비밀번호, 이름, 이메일, 닉네임 입력 필수",
-    "dup_id": "아이디: 영문/숫자 조합, 중복 불가, 금지단어 사용 불가",
-    "pw_len": "비밀번호: 최소 6자 이상",
-    "email":  "이메일 형식 검증 필수",
-    "agree":  "약관 및 개인정보처리방침 동의 필수",
-    "login":  "아이디 + 비밀번호로 로그인",
-    "fail":   "로그인 실패 시 오류 메시지 표시",
-    "noauth": "비로그인 상태에서 회원 전용 기능 접근 시 로그인 페이지로 이동",
-    "write":  "비로그인 시 작성 불가 (설정에 따라 비회원 작성 허용 가능)",
-    "title":  "제목 필수, 내용 선택",
-    "del":    "삭제 시 확인 다이얼로그 표시",
-    "cmnt":   "댓글 내용 필수",
-    "search": "제목, 내용, 작성자 검색 가능",
-    "perm":   "작성자 본인 또는 관리자만 수정 가능",
-    "page":   "게시판별 글 목록 표시 (페이지네이션)",
-    "secret": "비밀글: 작성자·관리자 외 내용 비공개",
-    "file":   "허용 확장자 관리자 설정",
-    "point":  "회원가입, 로그인, 게시글 작성, 댓글 작성 시 포인트 적립",
-    "level":  "회원 레벨 1~10 (10이 최고)",
-    "ip":     "차단된 IP에서 접속 시 접근 불가 메시지 표시",
-    "id_len": "아이디: 3~20자",
-    "nick":   "닉네임: 2~20자 (바이트)",
+# source_quote v2 — 3단계 형식: MANUAL:<인용> | INVARIANT:<name> | INFERRED:<근거>
+_Q: dict[str, str] = {
+    "join":   "MANUAL: 아이디, 비밀번호, 이름, 이메일, 닉네임 입력 필수",
+    "dup_id": "MANUAL: 아이디: 영문/숫자 조합, 중복 불가, 금지단어 사용 불가",
+    "pw_len": "MANUAL: 비밀번호: 최소 6자 이상",
+    "email":  "MANUAL: 이메일 형식 검증 필수",
+    "agree":  "MANUAL: 약관 및 개인정보처리방침 동의 필수",
+    "login":  "MANUAL: 아이디 + 비밀번호로 로그인",
+    "fail":   "MANUAL: 로그인 실패 시 오류 메시지 표시",
+    "noauth": "MANUAL: 비로그인 상태에서 회원 전용 기능 접근 시 로그인 페이지로 이동",
+    "write":  "MANUAL: 비로그인 시 작성 불가 (설정에 따라 비회원 작성 허용 가능)",
+    "title":  "MANUAL: 제목 필수, 내용 선택",
+    "del":    "MANUAL: 삭제 시 확인 다이얼로그 표시",
+    "cmnt":   "MANUAL: 댓글 내용 필수",
+    "search": "MANUAL: 제목, 내용, 작성자 검색 가능",
+    "perm":   "INVARIANT: auth_gate_mutable_actions",
+    "page":   "MANUAL: 게시판별 글 목록 표시 (페이지네이션)",
+    "secret": "MANUAL: 비밀글: 작성자·관리자 외 내용 비공개",
+    "file":   "MANUAL: 허용 확장자 관리자 설정",
+    "point":  "MANUAL: 회원가입, 로그인, 게시글 작성, 댓글 작성 시 포인트 적립",
+    "level":  "MANUAL: 회원 레벨 1~10 (10이 최고)",
+    "ip":     "MANUAL: 차단된 IP에서 접속 시 접근 불가 메시지 표시",
+    "id_len": "MANUAL: 아이디: 3~20자",
+    "nick":   "MANUAL: 닉네임: 2~20자 (바이트)",
+    # invariant 기반 출처
+    "inv_perm":   "INVARIANT: auth_gate_mutable_actions",
+    "inv_title":  "INVARIANT: post_title_max_length",
+    "inv_page":   "INVARIANT: pagination_out_of_range_fallback",
+    "inv_req":    "INVARIANT: required_field_empty_rejection",
+    "inv_edit":   "INVARIANT: edit_form_validation_parity",
+    "inv_hidden": "INVARIANT: non_owner_action_button_hidden",
+    "inv_anon":   "INVARIANT: anonymous_write_blocked",
 }
 
 
-def _t(tc_id, scenario, precondition, expected, technique, source_quote_key, confidence=0.88):
+def _t(
+    tc_id, scenario, precondition, expected, technique, source_quote_key,
+    confidence=0.88, applied_invariant=None, related_defect_id=None,
+):
+    sq = _Q.get(source_quote_key, f"INFERRED: {scenario[:40]}")
     return {
         "tc_id": tc_id,
         "scenario": scenario,
         "precondition": precondition,
         "expected": expected,
         "design_technique": technique,
-        "source_quote": _Q.get(source_quote_key, f"INFERRED: {scenario[:40]}"),
+        "source_quote": sq,
         "gen_confidence": confidence,
+        "applied_invariant": applied_invariant,
+        "related_defect_id": related_defect_id,
     }
 
 
@@ -513,7 +554,7 @@ _GNUBOARD5_TCS: dict[str, list[dict]] = {
 
 def _generic_tcs(leaf: str, mid: str, major: str, excerpt: str) -> list[dict]:
     """미리 정의되지 않은 leaf에 대한 기본 TC 3개 생성."""
-    src = excerpt[:60] if excerpt else f"INFERRED: {leaf}"
+    src = f"MANUAL: {excerpt[:60]}" if excerpt else f"INFERRED: {leaf} 기본 동작"
     return [
         {
             "tc_id": "",
@@ -523,6 +564,8 @@ def _generic_tcs(leaf: str, mid: str, major: str, excerpt: str) -> list[dict]:
             "design_technique": "happy_path",
             "source_quote": src,
             "gen_confidence": 0.70,
+            "applied_invariant": None,
+            "related_defect_id": None,
         },
         {
             "tc_id": "",
@@ -530,8 +573,10 @@ def _generic_tcs(leaf: str, mid: str, major: str, excerpt: str) -> list[dict]:
             "precondition": f"비로그인 상태 / {leaf} URL 직접 접근",
             "expected": "로그인 페이지로 리다이렉트",
             "design_technique": "negative_basic",
-            "source_quote": "비로그인 상태에서 회원 전용 기능 접근 시 로그인 페이지로 이동",
+            "source_quote": "MANUAL: 비로그인 상태에서 회원 전용 기능 접근 시 로그인 페이지로 이동",
             "gen_confidence": 0.72,
+            "applied_invariant": None,
+            "related_defect_id": None,
         },
         {
             "tc_id": "",
@@ -539,7 +584,9 @@ def _generic_tcs(leaf: str, mid: str, major: str, excerpt: str) -> list[dict]:
             "precondition": f"로그인 상태 / {leaf} 화면 / 필수 입력 비워둔 채 제출",
             "expected": "필수 입력 항목 오류 메시지 표시, 제출 불가",
             "design_technique": "negative_basic",
-            "source_quote": f"INFERRED: {leaf} 필수 입력 검증",
+            "source_quote": "INVARIANT: required_field_empty_rejection",
             "gen_confidence": 0.68,
+            "applied_invariant": "required_field_empty_rejection",
+            "related_defect_id": "DEF-2026-BRD-004",
         },
     ]

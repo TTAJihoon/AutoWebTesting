@@ -30,6 +30,20 @@ CREATE TABLE IF NOT EXISTS awt_sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON awt_sessions(expires_at);
+
+CREATE TABLE IF NOT EXISTS awt_asset_events (
+    event_id    SERIAL PRIMARY KEY,
+    asset_type  VARCHAR(32)  NOT NULL,   -- 'defect' | 'invariant' | 'pattern'
+    asset_id    VARCHAR(64)  NOT NULL,   -- 'DEF-2026-BRD-001'
+    action      VARCHAR(32)  NOT NULL,   -- 'created' | 'pattern_approved' | 'rejected' | 'archived'
+    actor_id    INT REFERENCES awt_users(user_id) ON DELETE SET NULL,
+    actor_name  VARCHAR(64),             -- 비정규화 (계정 삭제 후도 이력 유지)
+    note        TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_asset_events_asset  ON awt_asset_events(asset_type, asset_id);
+CREATE INDEX IF NOT EXISTS idx_asset_events_actor  ON awt_asset_events(actor_id);
 """
 
 

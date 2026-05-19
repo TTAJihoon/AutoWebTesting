@@ -86,15 +86,26 @@ def _v1(tcs: list[dict]) -> list[dict]:
     return failures
 
 
+def _classify_source_quote(sq: str) -> str:
+    """source_quote를 3단계로 분류: 'manual' | 'invariants' | 'inferred'"""
+    if sq.startswith("INFERRED"):
+        return "inferred"
+    if sq.startswith("INVARIANT:") or sq.startswith("DEFECT:"):
+        return "invariants"
+    return "manual"
+
+
 def _v2(tcs: list[dict], manual_text: str) -> list[dict]:
+    """V2: MANUAL 출처는 매뉴얼 대조, INVARIANT/INFERRED는 skip."""
     failures = []
     normalized = re.sub(r"\s+", " ", manual_text)
     for tc in tcs:
         sq = str(tc.get("source_quote", ""))
-        if sq.startswith("INFERRED"):
-            continue
-        # 30자 이상 인용문은 매뉴얼에서 검색
-        quote = sq[:80].strip()
+        source_type = _classify_source_quote(sq)
+        if source_type != "manual":
+            continue  # INVARIANT·INFERRED는 V2 대조 대상 아님
+        # MANUAL: 접두어 제거 후 대조
+        quote = sq.removeprefix("MANUAL:").strip()[:80]
         if len(quote) > 10:
             norm_q = re.sub(r"\s+", " ", quote)
             if norm_q not in normalized:
@@ -104,15 +115,17 @@ def _v2(tcs: list[dict], manual_text: str) -> list[dict]:
 
 
 def _v3(tcs: list[dict], threshold: float) -> list[dict]:
+    """V3: INFERRED(추론) 비율만 임계 적용. INVARIANT 출처는 신뢰 소스로 분리."""
     if not tcs:
         return []
     inferred_cnt = sum(
-        1 for tc in tcs if str(tc.get("source_quote", "")).startswith("INFERRED")
+        1 for tc in tcs if _classify_source_quote(str(tc.get("source_quote", ""))) == "inferred"
     )
     ratio = inferred_cnt / len(tcs)
     if ratio > threshold:
         return [{"tc_id": "ALL", "v": "V3",
-                 "reason": f"INFERRED 비율 {ratio:.1%} > 임계 {threshold:.1%}"}]
+                 "reason": f"INFERRED 비율 {ratio:.1%} > 임계 {threshold:.1%} "
+                            f"(INVARIANT 출처는 제외)"}]
     return []
 
 

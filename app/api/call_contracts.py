@@ -42,10 +42,11 @@ def load(contract_id: str) -> Contract:
     path = _PROMPTS_DIR / f"{contract_id.lower().replace('_', '_')}.md"
     # DOM_SPEC → dom_spec.md
     name_map = {
-        "DOM_SPEC": "dom_spec",
-        "TC_DESIGN": "tc_design",
-        "TC_REGEN": "tc_regen",
-        "FAILURE_ANALYSIS": "failure_analysis",
+        "DOM_SPEC":        "dom_spec",
+        "TC_DESIGN":       "tc_design",
+        "TC_REGEN":        "tc_regen",
+        "FAILURE_ANALYSIS":"failure_analysis",
+        "PATTERN_EXTRACT": "pattern_extract",
     }
     fname = name_map.get(contract_id, contract_id.lower())
     path = _PROMPTS_DIR / f"{fname}.md"
