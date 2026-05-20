@@ -3,7 +3,7 @@
 모델명 prefix에 따라 적절한 provider를 반환한다:
     claude-* → AnthropicProvider
     gpt-*, o1-*, o3-* → OpenAIProvider
-    gemini-* → GeminiProvider
+    gemini-*, gemma-* → GeminiProvider
 
 상세 설계: doc/07-llm-providers.md
 """
@@ -21,7 +21,7 @@ def provider_name_for_model(model: str) -> str:
         return "anthropic"
     if m.startswith("gpt-") or m.startswith("o1-") or m.startswith("o3-"):
         return "openai"
-    if m.startswith("gemini-"):
+    if m.startswith("gemini-") or m.startswith("gemma-"):
         return "google"
     raise ValueError(
         f"Unknown model prefix: {model!r}. "

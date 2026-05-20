@@ -30,24 +30,35 @@ class GeminiProvider(LLMProvider):
     ) -> ChatResult:
         from google.genai import types
 
-        config_kwargs: dict = {
-            "max_output_tokens": max_tokens,
-            "system_instruction": system,
-        }
-        if json_mode:
-            config_kwargs["response_mime_type"] = "application/json"
+        m = model.lower()
+        _is_gemini2 = m.startswith("gemini-2.")
+        _is_gemma   = m.startswith("gemma-")
 
-        # Gemini 2.5 Flash/Pro 는 thinking 기능이 기본 ON.
-        # thinking 토큰이 max_output_tokens 예산을 잠식해 JSON이 중간에 잘리는 문제를 방지.
-        # JSON 출력 용도에서는 thinking을 비활성화해 예산 전체를 실제 응답에 사용.
-        try:
-            config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
-        except (AttributeError, TypeError):
-            pass  # SDK가 ThinkingConfig 미지원 시 무시
+        config_kwargs: dict = {"max_output_tokens": max_tokens}
+
+        # system_instruction: gemma-* 모델은 미지원 → user 프롬프트에 병합
+        if _is_gemma:
+            contents = f"{system}\n\n---\n\n{user}" if system else user
+        else:
+            config_kwargs["system_instruction"] = system
+            contents = user
+
+        # JSON 모드: gemma-* 미지원 → 프롬프트에 JSON 요청 추가
+        if json_mode and not _is_gemma:
+            config_kwargs["response_mime_type"] = "application/json"
+        elif json_mode and _is_gemma:
+            contents += "\n\n반드시 JSON만 출력하고 다른 텍스트는 포함하지 마세요."
+
+        # thinking_budget=0: gemini-2.x Flash/Pro 전용 (thinking 토큰이 JSON 예산 잠식 방지)
+        if _is_gemini2:
+            try:
+                config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+            except (AttributeError, TypeError):
+                pass
 
         response = self._client.models.generate_content(
             model=model,
-            contents=user,
+            contents=contents,
             config=types.GenerateContentConfig(**config_kwargs),
         )
 
