@@ -92,12 +92,15 @@ def design(
             "negative_categories": _format_negative_categories(leaf["category_leaf"]),
         })
 
-        for tc in result.get("tcs", []):
+        for tc_idx, tc in enumerate(result.get("tcs", []), 1):
             # 프롬프트 출력 필드 → 내부 스키마 필드 정규화
             if "expected_output" in tc and "expected" not in tc:
                 tc["expected"] = tc.pop("expected_output")
             if "technique" in tc and "design_technique" not in tc:
                 tc["design_technique"] = tc.pop("technique")
+            # tc_id 강제 정규화 — LLM이 형식을 틀리거나 서픽스를 붙여도 덮어씀
+            # TC-{leaf_num:03d}-{tc_idx:03d} 형식 보장 (예: TC-001-003)
+            tc["tc_id"] = f"TC-{leaf_num}-{tc_idx:03d}"
             # G1 필드 보강
             tc["대분류"] = leaf["category_major"]
             tc["중분류"] = leaf["category_mid"]

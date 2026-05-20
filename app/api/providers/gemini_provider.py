@@ -37,6 +37,14 @@ class GeminiProvider(LLMProvider):
         if json_mode:
             config_kwargs["response_mime_type"] = "application/json"
 
+        # Gemini 2.5 Flash/Pro 는 thinking 기능이 기본 ON.
+        # thinking 토큰이 max_output_tokens 예산을 잠식해 JSON이 중간에 잘리는 문제를 방지.
+        # JSON 출력 용도에서는 thinking을 비활성화해 예산 전체를 실제 응답에 사용.
+        try:
+            config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+        except (AttributeError, TypeError):
+            pass  # SDK가 ThinkingConfig 미지원 시 무시
+
         response = self._client.models.generate_content(
             model=model,
             contents=user,

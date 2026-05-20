@@ -6,6 +6,53 @@
 
 ## 1. 지금 어디까지 했나 (Last updated: 2026-05-20)
 
+### 🟡 Gemini 3.5 Flash 실전 실행 — Stage 2 중단 (2026-05-20)
+
+| 단계 | 상태 | 내용 |
+|---|---|---|
+| Stage 1 | ✅ | 그누보드5 매뉴얼 파싱 — leaf 26개 추출 |
+| Stage 2 | 🟡 22/26 | F001-F022 완료, F023-F026 일일 quota 소진으로 중단 |
+| Stage 3 | ❌ 미실행 | Stage 2 완료 후 실행 필요 |
+
+**재개 방법 (quota 리셋 후):**
+```powershell
+# gemini-3.5-flash quota: 20 req/day, UTC 자정 리셋
+# https://aistudio.google.com/quota 에서 잔여량 확인
+
+python scripts\resume_gemini_run.py
+# → F001-F022: 캐시 히트 (API 호출 0)
+# → F023-F026: API 호출 4회 (13초 간격 자동 대기)
+# → Stage 3: V1~V10 검증 + TC 보완
+```
+
+**Gemini 통합 주요 변경사항:**
+
+| 파일 | 변경 내용 |
+|---|---|
+| `app/api/llm_client.py` | `model_override` 지원, RPM 스로틀링 (gemini-3.5-flash=13s), 503/429 재시도, JSON Extra data 파싱 |
+| `app/api/providers/gemini_provider.py` | `ThinkingConfig(thinking_budget=0)` — thinking 토큰이 JSON 예산 잠식 방지 |
+| `app/core/orchestrator.py` | `RunConfig.model_override` 추가 |
+| `app/core/stage2_tc_design.py` | TC ID 강제 정규화 (`TC-{leaf_num}-{tc_idx:03d}`) |
+| `scripts/resume_gemini_run.py` | Gemini 재개 원클릭 스크립트 (신규) |
+
+**캐시 현황:**
+- `data/llm_cache/` — 35개 캐시 파일
+- `data/runs/gemini35_run_01/` — 진행 중인 run 디렉터리
+- 캐시된 leaf: F001~F022 (TC_DESIGN 22회 분)
+- API 키: `~/.awt/settings.enc` 에 암호화 저장 (google provider)
+
+**주요 해결된 문제:**
+
+| 오류 | 원인 | 수정 |
+|---|---|---|
+| JSON 중간 절단 | Gemini 2.5/3.5 Flash thinking 토큰이 max_output_tokens 잠식 | `thinking_budget=0` 추가 |
+| TC ID 형식 오류 (`TC-001-001-01`) | Gemini가 프롬프트 형식 불이행 | stage2에서 강제 재부여 |
+| JSON Extra data | Gemini 재시도 후 중복 데이터 | `raw_decode()` 첫 객체만 파싱 |
+| 5 RPM 한도 초과 | gemini-3.5-flash free tier | `_MIN_INTERVAL=13초` 자동 슬립 |
+| 일일 quota 소진 | free tier 20 req/day | 캐시로 22개 보존, quota 리셋 후 4개만 추가 |
+
+---
+
 ### ✅ 외부 제안 #4·#5 적용 완료 (2026-05-20)
 
 | 구성 요소 | 파일 | 상태 |
@@ -165,29 +212,45 @@ Mock 파이프라인 재검증 결과 (2026-05-20):
 
 **→ 새 PC라면 `SETUP.md`를 먼저 읽어라.**
 
-Phase 2 실행 순서:
+### 최우선: Gemini 실전 실행 재개
 
 ```powershell
-# 옵션 A: Stage 1~3만 (Docker 없이, API key만 필요)
+# quota 잔여량 확인 후 실행 (UTC 자정 리셋)
+# https://aistudio.google.com/quota
+
+python scripts\resume_gemini_run.py
+# 예상 소요: ~1분 (4회 API 호출 × 13초 간격 + Stage 3)
+# 산출물: data\runs\gemini35_run_01\tc_verified.json + tc_review.xlsx
+```
+
+### Phase 2 전체 실행 순서
+
+```powershell
+# 옵션 A-1: Gemini 재개 (현재 권장)
+python scripts\resume_gemini_run.py
+
+# 옵션 A-2: 새 run으로 처음부터 (Gemini)
+python scripts\resume_gemini_run.py --new-run
+
+# 옵션 B: Anthropic으로 Stage 1~3
 set ANTHROPIC_API_KEY=sk-ant-...
 python scripts\run_stage123.py
 
-# 옵션 B: Stage 0~7 전체 (Docker + 그누보드5 설치 필요)
+# 옵션 C: Stage 0~7 전체 (Docker + 그누보드5 설치 필요)
 .\data\oss\gnuboard5\setup.ps1          # 그누보드5 Docker 셋업
 # → http://localhost:8080/install 에서 초기 설치
-set ANTHROPIC_API_KEY=sk-ant-...
 python scripts\run_full_pipeline.py `
     --url http://localhost:8080 `
     --manual data\oss\gnuboard5\manual\gnuboard5_spec.md `
     --auth-id admin --auth-pw <비밀번호>
 
-# 옵션 C: GUI 앱 (PostgreSQL + Docker 모두 필요)
+# 옵션 D: GUI 앱 (PostgreSQL + Docker 모두 필요)
 python -m app.auth.admin_cli init       # 최초 1회
 python -m app.auth.admin_cli create-user
 python app\main.py
 ```
 
-**추천 지금 당장: 옵션 A** — API key만 있으면 Stage 1~3 TC 설계 결과 확인 가능
+**추천: 옵션 A-1** — Gemini quota 리셋 확인 후 원클릭 재개
 
 ---
 

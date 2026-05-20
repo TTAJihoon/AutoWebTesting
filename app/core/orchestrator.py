@@ -28,6 +28,9 @@ class RunConfig:
     auth_sequence: list[dict] = field(default_factory=list)
     run_id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
     inferred_threshold: float = 0.30
+    model_override: str | None = None
+    """Contract frontmatter 모델을 이 모델로 교체. 예: 'gemini-2.5-flash'.
+    None이면 각 Contract의 model 그대로 사용."""
 
 
 class Orchestrator:
@@ -38,7 +41,11 @@ class Orchestrator:
         self._cb = progress_cb or (lambda msg: None)
         self.run_dir = RUNS_DIR / config.run_id
         self.run_dir.mkdir(parents=True, exist_ok=True)
-        self.llm = LLMClient(api_key=config.api_key, run_id=config.run_id)
+        self.llm = LLMClient(
+            api_key=config.api_key,
+            run_id=config.run_id,
+            model_override=config.model_override,
+        )
         self.tcs: list[dict] = []
         self.ingest_result: dict = {}
         self._stage = 0

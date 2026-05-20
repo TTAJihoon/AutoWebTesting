@@ -24,20 +24,41 @@ _LOG_DIR = Path("data/runs")
 class LLMClient:
     """LLM 호출 진입점. Stage 코드는 이 클래스의 .call()만 사용한다."""
 
-    def __init__(self, api_key: str, run_id: str, provider_override: str | None = None):
+    # 모델별 최소 호출 간격(초) — free tier RPM 기반
+    _MIN_INTERVAL: dict[str, float] = {
+        "gemini-3.5-flash":    13.0,  # 5 RPM → 60/5 = 12s + 1s 여유
+        "gemini-2.5-flash":    13.0,
+        "gemini-2.5-flash-lite": 6.0,
+        "gemini-2.0-flash":    6.0,
+        "gemini-1.5-flash":    5.0,
+    }
+
+    def __init__(
+        self,
+        api_key: str,
+        run_id: str,
+        provider_override: str | None = None,
+        model_override: str | None = None,
+    ):
         """
         Args:
             api_key: 선택된 provider의 API 키 (UI/.env에서 주입)
             run_id: 실행 ID — 로그 디렉터리 구분
             provider_override: 명시적 provider 이름 (테스트·실험용). 통상은 None — Contract model에서 자동 라우팅
+            model_override: Contract frontmatter의 model을 이 값으로 교체.
+                예) "gemini-3.5-flash" 설정 시 모든 Contract가 Gemini로 실행됨.
+                None이면 각 Contract의 model을 그대로 사용.
         """
         self._api_key = api_key
         self._run_id = run_id
         self._provider_override = provider_override
+        self._model_override = model_override
         self._log_dir = _LOG_DIR / run_id / "llm"
         self._log_dir.mkdir(parents=True, exist_ok=True)
         # provider 인스턴스 캐시 — 같은 provider는 1회만 생성
         self._providers: dict[str, LLMProvider] = {}
+        # RPM 제어 — 마지막 실제 API 호출 시각
+        self._last_call_time: float = 0.0
 
     def _get_provider(self, model: str) -> LLMProvider:
         name = self._provider_override or provider_name_for_model(model)
@@ -45,29 +66,62 @@ class LLMClient:
             self._providers[name] = resolve_provider(model, self._api_key)
         return self._providers[name]
 
-    def call(self, contract_id: str, inputs: dict[str, Any], use_cache: bool = True) -> dict:
-        """Contract 1회 호출. 캐시 히트 시 API 미호출."""
+    def call(
+        self,
+        contract_id: str,
+        inputs: dict[str, Any],
+        use_cache: bool = True,
+        _retry_count: int = 0,
+    ) -> dict:
+        """Contract 1회 호출. 캐시 히트 시 API 미호출.
+
+        503/429 일시 오류는 최대 3회 지수 백오프 재시도.
+        """
         contract = load_contract(contract_id)
+        # model_override가 있으면 Contract 모델 대신 사용 (다른 provider 전환 시)
+        effective_model = self._model_override or contract.model
 
         # 캐시 키에 model 포함 (다른 모델은 다른 결과 — D48)
         cache_inputs = dict(inputs)
-        cache_inputs["__model__"] = contract.model
+        cache_inputs["__model__"] = effective_model
         if use_cache:
             cached = cache_store.get(contract_id, contract.version, cache_inputs)
             if cached is not None:
                 return cached
 
         user_msg = contract.render_user(**inputs)
-        provider = self._get_provider(contract.model)
-        start = time.time()
+        provider = self._get_provider(effective_model)
 
-        result_chat = provider.chat(
-            system=contract.system_prompt,
-            user=user_msg,
-            model=contract.model,
-            max_tokens=contract.max_output_tokens,
-            json_mode=True,
-        )
+        # RPM 스로틀링 — 모델별 최소 간격 적용 (캐시 히트는 제외됨)
+        min_interval = self._MIN_INTERVAL.get(effective_model, 0.0)
+        if min_interval > 0 and _retry_count == 0:
+            elapsed_since_last = time.time() - self._last_call_time
+            if elapsed_since_last < min_interval:
+                wait = min_interval - elapsed_since_last
+                time.sleep(wait)
+
+        start = time.time()
+        self._last_call_time = start
+
+        try:
+            result_chat = provider.chat(
+                system=contract.system_prompt,
+                user=user_msg,
+                model=effective_model,
+                max_tokens=contract.max_output_tokens,
+                json_mode=True,
+            )
+        except Exception as e:
+            # 503/429 일시 오류 — 최대 3회 지수 백오프 재시도
+            err_str = str(e)
+            if _retry_count < 3 and any(
+                code in err_str for code in ("503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED")
+            ):
+                wait_sec = 10 * (2 ** _retry_count)  # 10 → 20 → 40초
+                self._log_retry(contract_id, _retry_count + 1, wait_sec, err_str)
+                time.sleep(wait_sec)
+                return self.call(contract_id, inputs, use_cache, _retry_count + 1)
+            raise
 
         elapsed = time.time() - start
         result = self._parse_json(result_chat.text)
@@ -90,6 +144,14 @@ class LLMClient:
 
         return result
 
+    def _log_retry(self, contract_id: str, attempt: int, wait_sec: int, err: str) -> None:
+        import sys
+        print(
+            f"  [LLMClient] {contract_id} 일시 오류 — {wait_sec}초 후 재시도 "
+            f"({attempt}/3): {err[:80]}",
+            file=sys.stderr,
+        )
+
     def _parse_json(self, text: str) -> dict:
         text = text.strip()
         # JSON 블록 추출 (```json ... ``` 감싸져 있을 수 있음 — Anthropic 자주 사용)
@@ -97,7 +159,16 @@ class LLMClient:
             m = re.search(r"```(?:json)?\s*([\s\S]+?)```", text)
             if m:
                 text = m.group(1).strip()
-        return json.loads(text)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as e:
+            # "Extra data" — 첫 번째 완성된 JSON 객체만 추출 (Gemini 재시도 시 간헐 발생)
+            if "Extra data" in str(e):
+                decoder = json.JSONDecoder()
+                obj, _ = decoder.raw_decode(text)
+                if isinstance(obj, dict):
+                    return obj
+            raise
 
     def _log(
         self,
