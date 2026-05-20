@@ -1,7 +1,9 @@
 # LLM Call Contract 설계 — 토큰 최적화
 
-**목적:** AWT에서 Anthropic API를 호출하는 모든 지점을 정형화. 각 Call은 입력 범위·출력 스키마·토큰 예산을 사전 고정해 낭비 없는 추론 호출을 보장.
-**결정 근거:** D38 (stateless 호출), D41 (토큰 최적화 원칙)
+**목적:** AWT에서 LLM API를 호출하는 모든 지점을 정형화. 각 Call은 입력 범위·출력 스키마·토큰 예산을 사전 고정해 낭비 없는 추론 호출을 보장.
+**결정 근거:** D38 (stateless 호출), D41 (토큰 최적화 원칙), **D48 (provider 추상화 — Anthropic/OpenAI/Gemini)**
+
+> **Provider 무관 인터페이스** — 본 문서의 모든 Contract는 `model:` frontmatter 필드의 prefix(`claude-*`/`gpt-*`/`gemini-*`)에 따라 자동 라우팅된다. 호출자(Stage 코드)는 provider 차이를 모름. 상세: [07-llm-providers.md](07-llm-providers.md)
 
 ---
 
@@ -280,16 +282,23 @@ TC ID: {tc_id}
 | FAILURE_ANALYSIS (5 TC) | 5 | 11,500 |
 | **합계** | **27** | **~111,500 tok** |
 
-**모델별 예상 비용:**
+**모델별 예상 비용 (10 leaf · 페이지 10 · 실패 5TC · 111,500 tok 기준):**
 
-| 모델 | 입력 단가 | 출력 단가 | 예상 비용 |
-|---|---|---|---|
-| claude-3-haiku | $0.25/M | $1.25/M | ~$0.05 |
-| claude-3-5-sonnet | $3/M | $15/M | ~$0.60 |
-| claude-3-7-sonnet | $3/M | $15/M | ~$0.60 |
+| Provider | 모델 | 입력 단가/M | 출력 단가/M | 전체 예상 |
+|---|---|---:|---:|---:|
+| Anthropic | claude-haiku-4-5 | $0.80 | $4.00 | ~$0.18 |
+| Anthropic | claude-sonnet-4-6 | $3.00 | $15.00 | ~$0.60 |
+| Anthropic | claude-opus-4-5 | $15.00 | $75.00 | ~$3.10 |
+| OpenAI | gpt-4o-mini | $0.15 | $0.60 | ~$0.03 |
+| OpenAI | gpt-4o | $2.50 | $10.00 | ~$0.45 |
+| Google | gemini-1.5-flash | $0.075 | $0.30 | ~$0.015 |
+| Google | gemini-1.5-pro | $1.25 | $5.00 | ~$0.25 |
+| Google | gemini-2.0-flash | $0.10 | $0.40 | ~$0.02 |
 
-→ **품질 우선: claude-3-5-sonnet 권장** (TC 설계 품질이 핵심)
-→ **TC_DESIGN·DOM_SPEC만 sonnet, 나머지는 haiku**로 혼합 사용 가능
+→ **품질 우선: claude-sonnet-4-6 권장** (TC 설계 품질이 핵심)
+→ **TC_DESIGN·DOM_SPEC만 sonnet, FAILURE_ANALYSIS는 haiku**로 혼합 사용 가능 (각 Contract `model:` 필드에서 개별 지정)
+→ **저비용 실험: gemini-1.5-flash로 전체 ~30배 절감** (품질 검증은 Phase 2 항목)
+→ 가격은 2026-05 기준 공시가. 운영 시 vendor 공식 페이지 재확인.
 
 ---
 
@@ -330,11 +339,11 @@ def save_cache(call_id: str, inputs: dict, result: dict):
 ```
 ---
 contract_id: TC_DESIGN
-version: v1.0
-model: claude-3-5-sonnet-20241022
+version: v2.0
+model: claude-sonnet-4-6        # prefix(claude-*/gpt-*/gemini-*)로 provider 자동 라우팅
 max_input_tokens: 4000
 max_output_tokens: 3000
 ---
 ```
 
-버전 변경 시 기존 캐시 자동 무효화 (버전 번호가 캐시 키에 포함됨).
+버전·모델 변경 시 기존 캐시 자동 무효화 (version + model이 캐시 키에 포함됨 — D48).

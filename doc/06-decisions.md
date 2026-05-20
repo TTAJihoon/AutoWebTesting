@@ -40,6 +40,7 @@
 | D44 | 중앙 인증 DB = **PostgreSQL** (향후 로그·통계 확장 고려) | 2026-05-19 |
 | D45 | UI 프레임워크 = **PySide6** (LGPL — 상용 배포 무료, Qt6 공식 바인딩) | 2026-05-19 |
 | D46 | Windows 설치 패키지 = **Inno Setup** (Python/PyInstaller 레퍼런스 풍부, 무료) | 2026-05-19 |
+| **D48** | **LLM provider = Anthropic 기본 + OpenAI/Gemini 선택 가능. 모델명 prefix(`claude-*`/`gpt-*`/`gemini-*`)로 자동 라우팅. provider별 API 키는 `.env`에 분리 저장. UI는 단일 provider 선택. D38(stateless)·D41(토큰 최적화) 유지. 상세: [doc/07-llm-providers.md](07-llm-providers.md)** | 2026-05-20 |
 
 ---
 
@@ -124,6 +125,7 @@
 | ~~Q-INFRA-2~~ | ~~UI 프레임워크~~ → **D45** | 2026-05-19 확정 |
 | ~~Q-INFRA-3~~ | ~~설치 패키지 도구~~ → **D46** | 2026-05-19 확정 |
 | Q-MX-1~4 | 25023·25051·25059 매트릭스의 시험소 실무 정합성 | Phase 1 진입 후 검수 |
+| ~~Q-LLM-0~~ | ~~LLM 호출이 Anthropic SDK에 직접 결합~~ → **D48** | 2026-05-20 확정 |
 
 ## 12. 미해결 — 운영 시 결정
 
@@ -138,6 +140,7 @@
 | Q-PA-3 | 재호출 3회 상한 적정성 | 운영 |
 | Q-PA-4 | API 호출 재시도 횟수·간격 정책 | Phase 1 개발 중 |
 | Q14 | Reviewer 결정권 범위 (책임·결재 라인) | 시험소 정책 결정 시 |
+| Q-LLM-1~4 | provider별 토큰 계산, ensemble, 캐시 분리, UI 토글 정책 | Phase 2 운영 (상세: doc/07-llm-providers.md §11) |
 
 ---
 

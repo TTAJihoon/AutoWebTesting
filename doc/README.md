@@ -4,16 +4,17 @@ AWT 프로젝트의 **모든 설계 결정의 단일 출처**. 구현은 이 문
 
 ---
 
-## 핵심 6개 문서
+## 핵심 7개 문서
 
 | # | 파일 | 내용 | 읽는 순서 |
 |---|---|---|---|
 | 1 | [01-architecture.md](01-architecture.md) | 전체 흐름 (Stage 0~7) + 데스크탑 앱 구조 + 인증 + Playwright | **시작점** |
-| 2 | [02-llm-contracts.md](02-llm-contracts.md) | LLM 호출 4종 Contract + 토큰 예산 + 캐시 | 01 이후 |
+| 2 | [02-llm-contracts.md](02-llm-contracts.md) | LLM 호출 5종 Contract + 토큰 예산 + 캐시 | 01 이후 |
 | 3 | [03-tc-schema.md](03-tc-schema.md) | TC 컬럼·타입·7기법·V1~V5 검증 | 01 이후 |
 | 4 | [04-iso-mapping.md](04-iso-mapping.md) | ISO/IEC 25010/25023/25051/25059 × Layer 분류 | 참조용 |
 | 5 | [05-poc-plan.md](05-poc-plan.md) | PoC-α/β/γ 계획 + 진행 상황 | 진행 중 |
-| 6 | [06-decisions.md](06-decisions.md) | D1~D43 확정 + 미해결 질문 (주제별) | 참조용 |
+| 6 | [06-decisions.md](06-decisions.md) | D1~D48 확정 + 미해결 질문 (주제별) | 참조용 |
+| 7 | [07-llm-providers.md](07-llm-providers.md) | LLM provider 추상화 (Anthropic/OpenAI/Gemini) | 02 보완 |
 
 ---
 

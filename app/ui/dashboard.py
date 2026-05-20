@@ -12,7 +12,22 @@ from PySide6.QtWidgets import (
 )
 
 from app.auth.db_client import DBClient
-from app.config.settings import save_api_key, load_api_key, delete_api_key
+from app.config.settings import (
+    save_api_key, load_api_key, delete_api_key,
+    get_active_provider, set_active_provider, VALID_PROVIDERS,
+)
+
+# Provider 표시 라벨 (UI용)
+_PROVIDER_LABELS = {
+    "anthropic": "Anthropic (Claude)",
+    "openai":    "OpenAI (GPT)",
+    "google":    "Google (Gemini)",
+}
+_PROVIDER_PLACEHOLDERS = {
+    "anthropic": "sk-ant-...",
+    "openai":    "sk-...",
+    "google":    "AIza...",
+}
 
 RUNS_DIR = Path("data/runs")
 
@@ -114,11 +129,24 @@ class Dashboard(QMainWindow):
         lay.setContentsMargins(32, 24, 32, 24)
         lay.setSpacing(16)
 
-        lay.addWidget(QLabel("Anthropic API Key"))
+        # ── Provider 선택 (D48) ───────────────────────────────────────────
+        lay.addWidget(QLabel("LLM Provider"))
+        self._provider_combo = QComboBox()
+        for p in VALID_PROVIDERS:
+            self._provider_combo.addItem(_PROVIDER_LABELS[p], userData=p)
+        current = get_active_provider()
+        idx = list(VALID_PROVIDERS).index(current) if current in VALID_PROVIDERS else 0
+        self._provider_combo.setCurrentIndex(idx)
+        self._provider_combo.currentIndexChanged.connect(self._on_provider_changed)
+        lay.addWidget(self._provider_combo)
+
+        # ── API Key (활성 provider 기준) ──────────────────────────────────
+        self._api_label = QLabel(f"{_PROVIDER_LABELS[current]} API Key")
+        lay.addWidget(self._api_label)
         api_row = QHBoxLayout()
-        self._api_edit = QLineEdit(load_api_key() or "")
+        self._api_edit = QLineEdit(load_api_key(current) or "")
         self._api_edit.setEchoMode(QLineEdit.Password)
-        self._api_edit.setPlaceholderText("sk-ant-...")
+        self._api_edit.setPlaceholderText(_PROVIDER_PLACEHOLDERS[current])
         api_row.addWidget(self._api_edit)
         save_btn = QPushButton("저장")
         save_btn.clicked.connect(self._save_api_key)
@@ -128,8 +156,28 @@ class Dashboard(QMainWindow):
         api_row.addWidget(del_btn)
         lay.addLayout(api_row)
 
+        # 안내 라벨
+        hint = QLabel(
+            "Provider별 API 키는 각각 따로 저장됩니다. Provider 전환 시 해당 키만 사용됩니다.\n"
+            "모델은 prompts/*.md 의 model 필드(claude-* / gpt-* / gemini-*)로 결정됩니다."
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #888; font-size: 11px;")
+        lay.addWidget(hint)
+
         lay.addStretch()
         return w
+
+    def _on_provider_changed(self, index: int) -> None:
+        """Provider 드롭다운 변경 시 — 활성 provider 갱신 + 해당 키 로드."""
+        provider = self._provider_combo.itemData(index)
+        if not provider:
+            return
+        set_active_provider(provider)
+        self._api_label.setText(f"{_PROVIDER_LABELS[provider]} API Key")
+        self._api_edit.setText(load_api_key(provider) or "")
+        self._api_edit.setPlaceholderText(_PROVIDER_PLACEHOLDERS[provider])
+        self.statusBar().showMessage(f"Provider 전환: {_PROVIDER_LABELS[provider]}", 3000)
 
     def _build_users_tab(self) -> QWidget:
         """admin 전용 사용자 관리 탭."""
@@ -205,17 +253,23 @@ class Dashboard(QMainWindow):
 
     # ── 설정 액션 ────────────────────────────────────────────────────────
     def _save_api_key(self) -> None:
+        provider = self._provider_combo.currentData()
         key = self._api_edit.text().strip()
         if not key:
             QMessageBox.warning(self, "경고", "API Key가 비어있습니다.")
             return
-        save_api_key(key)
-        self.statusBar().showMessage("API Key 저장 완료", 3000)
+        save_api_key(key, provider=provider)
+        self.statusBar().showMessage(
+            f"{_PROVIDER_LABELS[provider]} API Key 저장 완료", 3000
+        )
 
     def _delete_api_key(self) -> None:
-        delete_api_key()
+        provider = self._provider_combo.currentData()
+        delete_api_key(provider=provider)
         self._api_edit.clear()
-        self.statusBar().showMessage("API Key 삭제 완료", 3000)
+        self.statusBar().showMessage(
+            f"{_PROVIDER_LABELS[provider]} API Key 삭제 완료", 3000
+        )
 
     # ── 사용자 관리 액션 ──────────────────────────────────────────────────
     def _refresh_users(self) -> None:

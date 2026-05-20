@@ -6,6 +6,42 @@
 
 ## 1. 지금 어디까지 했나 (Last updated: 2026-05-20)
 
+### ✅ LLM Provider 추상화 완료 (2026-05-20)
+
+| 구성 요소 | 파일 | 상태 |
+|---|---|---|
+| 설계 문서 | `doc/07-llm-providers.md` (신규) | ✅ |
+| 결정 등록 | `doc/06-decisions.md` → **D48** | ✅ |
+| 추상 인터페이스 | `app/api/providers/base.py` (`LLMProvider`, `ChatResult`) | ✅ |
+| Anthropic provider | `app/api/providers/anthropic_provider.py` | ✅ |
+| OpenAI provider | `app/api/providers/openai_provider.py` | ✅ |
+| Gemini provider | `app/api/providers/gemini_provider.py` | ✅ |
+| 라우터 | `app/api/providers/__init__.py` (모델 prefix → provider) | ✅ |
+| LLMClient 리팩토링 | `app/api/llm_client.py` (provider 라우팅 + 캐시 키에 model 포함) | ✅ |
+| settings.py 확장 | `app/config/settings.py` (provider별 키 + active provider) | ✅ |
+| UI provider 토글 | `app/ui/dashboard.py` (드롭다운 + 선택된 provider 키만 입력) | ✅ |
+| 환경변수 | `.env.example`, `requirements.txt` | ✅ |
+| 단위 테스트 | `tests/test_provider_routing.py` (28개 PASS) | ✅ |
+
+회귀 검증:
+- pytest 전체 **64개 PASS** (V6 36 + provider 28)
+- Mock 파이프라인 재실행: **TC 79개·INFERRED 0%·기법 분포 동일** — baseline 100% 유지
+- 모델명 prefix(`claude-*`/`gpt-*`/`gemini-*`)로 자동 라우팅 — 기존 `prompts/*.md` 그대로 사용
+
+### 사용 예
+```powershell
+# Anthropic (기본)
+$env:LLM_PROVIDER="anthropic"; $env:ANTHROPIC_API_KEY="sk-ant-..."
+python scripts\run_stage123.py
+
+# OpenAI로 전환 (prompts의 model 필드 일괄 변경 필요)
+$env:LLM_PROVIDER="openai"; $env:OPENAI_API_KEY="sk-..."
+# prompts/*.md 의 model: claude-sonnet-4-6 → gpt-4o 로 일괄 수정
+python scripts\run_stage123.py
+```
+
+
+
 ### ✅ 완료
 - **설계 동결** — `doc/` 7개 문서 작성 완료 (D1~D43 확정)
 - **PoC-α** — Stage 1~3 시뮬레이션, TC 41개 산출
@@ -169,6 +205,7 @@ python app\main.py
 | **인증** | 중앙 DB 서버(PostgreSQL), 처리는 로컬 | D40·**D44** |
 | **UI** | PySide6 (LGPL, Qt6 공식) | **D45** |
 | **설치** | Inno Setup + PyInstaller | **D46** |
+| **LLM Provider** | Anthropic/OpenAI/Gemini 추상화 (모델 prefix 자동 라우팅) | **D48** |
 
 상세는 `doc/06-decisions.md` 참조.
 
