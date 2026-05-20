@@ -1,9 +1,9 @@
 ---
 contract_id: TC_REGEN
-version: v1.1
+version: v1.2
 model: claude-sonnet-4-6
-max_input_tokens: 4000
-max_output_tokens: 3000
+max_input_tokens: 6000
+max_output_tokens: 4000
 ---
 
 [System]
@@ -33,8 +33,13 @@ max_output_tokens: 3000
 - technique이 negative_basic 또는 negative_deep이면 negative_category를 5enum 중 하나로 지정
 - 그 외 기법은 negative_category = null
 - tc_id는 원본과 동일하게 유지 (교체 대상임)
+- source_quote를 INFERRED에서 MANUAL로 바꿀 때는 반드시 아래 매뉴얼 발췌문에서 직접 인용할 것
+- 매뉴얼에 근거가 없으면 INFERRED: <근거설명> 형태를 유지하되 gen_confidence를 낮게 설정
 
 [User]
+## 매뉴얼 발췌 (source_quote 인용 시 참고)
+{manual_excerpt}
+
 ## 실패한 TC 목록
 {failed_tcs_json}
 

@@ -30,6 +30,10 @@ INFERRED_THRESHOLD = 0.30
 NEGATIVE_COVERAGE_MIN = 0.6
 
 
+_REGEN_BATCH_SIZE = 10   # V3 REGEN: 한 번에 처리할 최대 TC 수
+_REGEN_TC_JSON_LIMIT = 6000  # failed_tcs_json 문자 한계
+
+
 def verify(
     tcs: list[dict],
     manual_text: str,
@@ -72,9 +76,14 @@ def verify(
             vs_all = {f["v"] for f in structural if f["tc_id"] == "ALL"}
             if "V3" in vs_all:
                 # V3: INFERRED 비율 초과 → INFERRED TC만 재생성
-                for tc in tcs:
-                    if _classify_source_quote(str(tc.get("source_quote", ""))) == "inferred":
-                        failed_ids.add(tc["tc_id"])
+                # gen_confidence 낮은 순(개선 여지 높은 순) 상위 REGEN_BATCH_SIZE개만 선택
+                inferred_tcs = [
+                    tc for tc in tcs
+                    if _classify_source_quote(str(tc.get("source_quote", ""))) == "inferred"
+                ]
+                inferred_tcs.sort(key=lambda t: float(t.get("gen_confidence", 0.5)))
+                for tc in inferred_tcs[:_REGEN_BATCH_SIZE]:
+                    failed_ids.add(tc["tc_id"])
             if "V4" in vs_all:
                 # V4: happy_path 비율 초과 → happy_path TC 일부 재생성
                 hp_tcs = [tc for tc in tcs if tc.get("design_technique") == "happy_path"]
@@ -88,9 +97,12 @@ def verify(
         failed_tcs = [tc for tc in tcs if tc.get("tc_id") in failed_ids]
 
         fix_instructions = _build_fix_instructions(structural)
+        # manual_excerpt: failed_tcs의 requirement_id에 해당하는 매뉴얼 발췌문
+        manual_excerpt = _extract_manual_for_tcs(failed_tcs, manual_text)
         regen_result = llm_client.call("TC_REGEN", {
-            "failed_tcs_json": str(failed_tcs)[:3000],
-            "v_failures":      str(structural)[:600],
+            "manual_excerpt":   manual_excerpt[:2000],
+            "failed_tcs_json":  str(failed_tcs)[:_REGEN_TC_JSON_LIMIT],
+            "v_failures":       str(structural)[:800],
             "fix_instructions": fix_instructions[:400],
         })
 
@@ -333,6 +345,51 @@ def _v5(tcs: list[dict], leaves: list[dict]) -> list[dict]:
         return [{"tc_id": "ALL", "v": "V5",
                  "reason": f"leaf 미커버: {missing}"}]
     return []
+
+
+def _extract_manual_for_tcs(failed_tcs: list[dict], manual_text: str) -> str:
+    """failed_tcs의 소분류(category_leaf) 또는 시나리오 키워드로 매뉴얼 발췌.
+
+    TC가 참조하는 기능명을 키워드로 삼아 매뉴얼에서 관련 단락을 추출한다.
+    - 각 TC의 소분류·시나리오에서 첫 단어(핵심 명사) 추출
+    - 매뉴얼에서 해당 단어가 포함된 줄 ± 2줄 추출
+    - 중복 제거 후 반환
+    """
+    keywords: set[str] = set()
+    for tc in failed_tcs:
+        for field in ("소분류", "scenario", "precondition"):
+            val = str(tc.get(field, ""))
+            # 첫 4 음절어 이상 단어 추출 (공백 분리)
+            for word in val.split():
+                word = word.strip(".,()[]「」『』")
+                if len(word) >= 4:
+                    keywords.add(word)
+                    if len(keywords) >= 10:
+                        break
+            if len(keywords) >= 10:
+                break
+
+    if not keywords:
+        # 키워드 없으면 매뉴얼 앞부분 반환
+        return manual_text[:1500]
+
+    lines = manual_text.splitlines()
+    hit_lines: list[int] = []
+    for i, line in enumerate(lines):
+        if any(kw in line for kw in keywords):
+            hit_lines.extend(range(max(0, i - 2), min(len(lines), i + 3)))
+
+    if not hit_lines:
+        return manual_text[:1500]
+
+    seen: set[int] = set()
+    excerpts: list[str] = []
+    for idx in sorted(set(hit_lines)):
+        if idx not in seen:
+            excerpts.append(lines[idx])
+            seen.add(idx)
+
+    return "\n".join(excerpts)
 
 
 def _build_fix_instructions(failures: list[dict]) -> str:
