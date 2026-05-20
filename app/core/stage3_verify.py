@@ -39,7 +39,7 @@ def verify(
     manual_text: str,
     llm_client,
     leaves: list[dict],
-    max_retries: int = 5,
+    max_retries: int = 3,
     inferred_threshold: float = INFERRED_THRESHOLD,
     progress_cb: Callable[[str], None] | None = None,
 ) -> list[dict]:
@@ -127,6 +127,9 @@ def verify(
                 if (orig_sq.startswith(("MANUAL:", "INVARIANT:", "DEFECT:"))
                         and _classify_source_quote(new_sq) == "inferred"):
                     merged["source_quote"] = orig_sq  # 원본 복원
+                # V1 검증: REGEN 결과가 V1 실패이면 원본 유지 (악화 방지)
+                if _v1([merged]):
+                    continue  # 원본 tc 유지, merged 적용 거부
                 tcs[i] = merged
 
     # 최대 재시도 초과 — 구조적 잔여 실패만 INFERRED 마킹
