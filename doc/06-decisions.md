@@ -41,6 +41,8 @@
 | D45 | UI 프레임워크 = **PySide6** (LGPL — 상용 배포 무료, Qt6 공식 바인딩) | 2026-05-19 |
 | D46 | Windows 설치 패키지 = **Inno Setup** (Python/PyInstaller 레퍼런스 풍부, 무료) | 2026-05-19 |
 | **D48** | **LLM provider = Anthropic 기본 + OpenAI/Gemini 선택 가능. 모델명 prefix(`claude-*`/`gpt-*`/`gemini-*`)로 자동 라우팅. provider별 API 키는 `.env`에 분리 저장. UI는 단일 provider 선택. D38(stateless)·D41(토큰 최적화) 유지. 상세: [doc/07-llm-providers.md](07-llm-providers.md)** | 2026-05-20 |
+| **D49** | **negative_category 5enum 정의 + V10 강제** — `validation_failure`/`duplicate_or_conflict`/`permission_denied`/`boundary_violation`/`injection_or_security`. 외부 제안 #4 채택. leaf 적용 가능 카테고리 중 ≥ 60% 충족, 각 카테고리당 ≥ 1 TC. 상세: [doc/03-tc-schema.md](03-tc-schema.md) §7 | 2026-05-20 |
+| **D50** | **failure_category 5enum 정의** — `selector_broken`/`scenario_error`/`expected_mismatch`/`real_defect`/`fictional_positive`. 외부 제안 #5 채택. V6 정적 분석 + LLM 동적 분석 통합 (V6 우선, 충돌 시 merged). 상세: [doc/03-tc-schema.md](03-tc-schema.md) §6 | 2026-05-20 |
 
 ---
 

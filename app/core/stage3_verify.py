@@ -1,7 +1,12 @@
-"""Stage 3 — V1~V5 검증 + 실패 시 TC_REGEN 재호출 (doc/03-tc-schema.md §5)."""
+"""Stage 3 — V1~V10 검증 + 실패 시 TC_REGEN 재호출 (doc/03-tc-schema.md §5).
+
+V10 추가 (D49): negative 카테고리 커버리지 강제.
+"""
 from __future__ import annotations
 import re
 from typing import Callable
+
+from app.validation import v10_negative_coverage
 
 _REQUIRED_COLS = [
     "tc_id", "대분류", "중분류", "소분류", "scenario",
@@ -16,6 +21,8 @@ _TC_ID_RE = re.compile(r"^TC-\d{3}-\d{3}$")
 
 # V3 INFERRED 임계 (PoC 결과 30% 완화, 실제 OSS 10% 재강제)
 INFERRED_THRESHOLD = 0.30
+# V10 최소 카테고리 커버리지 (D49)
+NEGATIVE_COVERAGE_MIN = 0.6
 
 
 def verify(
@@ -73,7 +80,15 @@ def _check_all(tcs, manual_text, leaves, inferred_threshold) -> list[dict]:
     failures += _v3(tcs, inferred_threshold)
     failures += _v4(tcs)
     failures += _v5(tcs, leaves)
+    failures += _v10(tcs, leaves)
     return failures
+
+
+def _v10(tcs: list[dict], leaves: list[dict]) -> list[dict]:
+    """V10 — D49 negative_category 커버리지 강제."""
+    return v10_negative_coverage.verify(
+        tcs, leaves, min_coverage=NEGATIVE_COVERAGE_MIN,
+    )
 
 
 def _v1(tcs: list[dict]) -> list[dict]:
@@ -162,4 +177,10 @@ def _build_fix_instructions(failures: list[dict]) -> str:
         parts.append("happy_path 외 다른 기법(boundary, negative_deep 등)을 더 사용하세요.")
     if "V5" in vs:
         parts.append("모든 leaf 기능에 최소 1개 TC를 포함하세요.")
+    if "V10" in vs:
+        parts.append(
+            "각 leaf의 적용 가능 negative 카테고리(validation_failure/duplicate_or_conflict/"
+            "permission_denied/boundary_violation/injection_or_security) 중 누락된 카테고리에 "
+            "negative_basic 또는 negative_deep TC를 1개씩 추가하세요."
+        )
     return " / ".join(parts)

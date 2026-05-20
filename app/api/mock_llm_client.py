@@ -83,13 +83,30 @@ class MockLLMClient:
         }
 
     def _failure_analysis(self, inputs: dict) -> dict:
+        """Mock FAILURE_ANALYSIS — D50 5enum 정확한 값 반환 + source_quote 기반 분류."""
         actual = inputs.get("actual_output", "")
         expected = inputs.get("expected_output", "")
+        sq = inputs.get("source_quote", "")
+
+        # D50 enum 5종 자동 분류 (실제 LLM은 prompt 강제로 직접 출력)
+        category = "real_defect"  # 기본값
+        evidence = "actual ≠ expected, 명료한 oracle"
+        if sq.startswith("INFERRED"):
+            category = "fictional_positive"
+            evidence = f"source_quote가 INFERRED — TC 자체가 가공된 명세 검증 의심"
+        elif any(k in actual.lower() for k in ("timeout", "nosuchelement", "요소 없음", "찾을 수 없")):
+            category = "selector_broken"
+            evidence = f"actual에 자동화 오류 단서 감지"
+        elif not expected.strip() or len(expected) < 10:
+            category = "expected_mismatch"
+            evidence = f"expected가 너무 짧거나 추상적 ({len(expected)}자)"
+
         return {
             "actual_output_summary": actual[:100] if actual else "페이지 내용 불일치",
             "difference": f"기대: {expected[:60]} / 실제: {actual[:60]}",
             "root_cause_candidates": ["UI 선택자 불일치", "비동기 로딩 타이밍", "권한 부족"],
-            "failure_category": "selector_break",  # selector_break|scenario_error|expected_error|true_defect|fictional_positive
+            "failure_category": category,
+            "category_evidence": evidence,
             "retry_history": "없음",
             "exec_confidence": 0.5,
         }
@@ -156,6 +173,28 @@ _Q: dict[str, str] = {
 }
 
 
+def _infer_negative_category(technique: str, scenario: str, precondition: str) -> str | None:
+    """D49 — negative_* 기법에 자동 카테고리 부여 (Mock 전용 휴리스틱).
+
+    실제 LLM은 prompt 강제로 직접 출력. Mock은 시나리오 문자열에서 키워드 추론.
+    """
+    if not technique.startswith("negative_"):
+        return None
+    text = (scenario + " " + precondition).lower()
+    # 우선순위가 있는 분류
+    if any(k in text for k in ("sql", "xss", "injection", "path traversal", "csrf")):
+        return "injection_or_security"
+    if any(k in text for k in ("중복", "이미 사용", "이미 존재", "동시", "충돌")):
+        return "duplicate_or_conflict"
+    if any(k in text for k in ("비로그인", "권한", "차단", "리다이렉트", "접근 불가",
+                                "권한 없", "만료", "퇴장")):
+        return "permission_denied"
+    if any(k in text for k in ("초과", "이상", "이하", "최대", "최소", "상한", "0자", "음수")):
+        return "boundary_violation"
+    # 기본값: 형식·필수·빈값 등 일반 validation
+    return "validation_failure"
+
+
 def _t(
     tc_id, scenario, precondition, expected, technique, source_quote_key,
     confidence=0.88, applied_invariant=None, related_defect_id=None,
@@ -167,6 +206,7 @@ def _t(
         "precondition": precondition,
         "expected": expected,
         "design_technique": technique,
+        "negative_category": _infer_negative_category(technique, scenario, precondition),
         "source_quote": sq,
         "gen_confidence": confidence,
         "applied_invariant": applied_invariant,

@@ -119,6 +119,9 @@ TC ID 시작 번호: {tc_id_start}  (예: TC-003-001부터)
 
 ## 관련 결함 패턴 (최대 500자)
 {defect_patterns}
+
+## 음성 카테고리 강제 (D49)
+{negative_categories}
 ```
 
 **입력 필드 제한:**
@@ -129,6 +132,7 @@ TC ID 시작 번호: {tc_id_start}  (예: TC-003-001부터)
 | `tc_id_start` | 이 leaf의 첫 TC ID | - |
 | `manual_excerpt` | 이 leaf와 직접 관련된 매뉴얼 섹션만 | **1,500자** |
 | `defect_patterns` | 이 기능 유형과 관련된 결함 패턴 요약 | **500자** |
+| `negative_categories` (D49) | leaf 유형별 음성 카테고리 목록 + 각 정의 + "각 카테고리당 ≥ 1 TC 강제" 지시 | **600자** |
 
 **제외 목록:**
 - 다른 leaf의 매뉴얼 내용
@@ -147,6 +151,7 @@ TC ID 시작 번호: {tc_id_start}  (예: TC-003-001부터)
       "precondition": "string (사전입력조건 — 구체적 값 포함)",
       "expected_output": "string (기대 출력 값 — 구체적)",
       "technique": "happy_path | equivalence | boundary | negative_basic | negative_deep | state_transition | cross_feature",
+      "negative_category": "validation_failure | duplicate_or_conflict | permission_denied | boundary_violation | injection_or_security | null (negative_* 기법일 때만 필수, D49)",
       "source_quote": "string (매뉴얼 직접 인용 or 'INFERRED: 이유')",
       "gen_confidence": 0.0
     }
@@ -258,10 +263,17 @@ TC ID: {tc_id}
   "root_cause_candidates": [
     "string"
   ],
+  "failure_category": "selector_broken | scenario_error | expected_mismatch | real_defect | fictional_positive (D50, 5enum 강제)",
+  "category_evidence": "string (어떤 단서로 그 카테고리를 골랐는지 — actual·expected·source_quote 참조)",
   "retry_history": "string (재시도 여부·결과)",
   "exec_confidence": 0.0
 }
 ```
+
+**D50 enum 정의:** `doc/03-tc-schema.md` §6 참조.
+- V6 사전 마킹된 `selector_broken`/`expected_mismatch`/`app_defect`는 그대로 보존 (LLM이 다시 추론하지 않음 — 토큰 절약 + 정적 분석 우선)
+- LLM은 V6 미마킹 FAIL에 대해서만 5분류 enum 부여
+- `fictional_positive` 의심 시 `source_quote` 가 INFERRED인지 우선 점검
 
 ### 6.4. 토큰 예산
 

@@ -272,14 +272,53 @@ data/runs/<run_id>/
 | **selector_stability_score** | V6 — 자동 실행 안정성 | ≥ 0.62 (data-testid 또는 text_exact 기반) | DOM 안정 selector 권고 |
 | **oracle_clarity_score** | V6 — 기대값 명료도 | ≥ 0.65 | 추상 표현 제거, 구체값 |
 | **exec_confidence** | 자동 실행 결과 신뢰도 | ≥ 0.70 | retry 또는 manual 재검토 |
-| **failure_category** | FAIL TC 분류 | selector_unstable / oracle_mismatch / app_defect / blocked | 카테고리별 후속 조치 |
+| **negative_category 커버리지 (V10)** | leaf 적용 카테고리 중 충족 비율 (D49) | ≥ 60%, 각 카테고리당 ≥ 1 TC | TC_REGEN으로 누락 카테고리 추가 |
+| **failure_category (D50)** | FAIL TC 5enum 분류 | `selector_broken` / `scenario_error` / `expected_mismatch` / `real_defect` / `fictional_positive` | 분류별 후속 조치 (§6.4) |
 
-### 6.3 source_quote 3단계 출처 (D48 관련 — 자산 저장소)
+### 6.3 source_quote 3단계 출처 (자산 저장소)
 - `MANUAL: ...` — 매뉴얼에서 직접 인용. **신뢰도 최상**
 - `INVARIANT: ...` — `data/assets/domain-invariants/*.yaml` 의 회사 정책. **신뢰도 상**
 - `INFERRED: ...` — LLM 추론. **신뢰도 하** (V3 임계로 제한)
 
 Mock 베이스라인은 MANUAL 92.4% / INVARIANT 7.6% / INFERRED 0% — 자산 저장소가 잘 작동하는 증거.
+
+### 6.4 V10 negative 카테고리 (D49 — 제안 #4 채택)
+
+LLM이 음성 케이스를 *깊이 있게* 만들도록 5카테고리 강제. 각 leaf의 적용 카테고리당 ≥ 1 TC 필수.
+
+| 카테고리 | 의미 | 예시 |
+|---|---|---|
+| `validation_failure` | 입력 형식·필수값 위반 | 이메일 형식 오류, 빈 필드 |
+| `duplicate_or_conflict` | 중복·동시성·충돌 | 중복 아이디, 동시 수정 |
+| `permission_denied` | 권한 거부 | 비로그인, 권한 없는 사용자 |
+| `boundary_violation` | 경계값 초과 | 최대 길이 +1, 0/음수 |
+| `injection_or_security` | 보안 공격 패턴 | SQL/XSS/Path traversal |
+
+**leaf 유형별 적용 카테고리:**
+- 입력 폼 (가입·로그인·작성·수정·삭제) → `validation_failure` + `duplicate_or_conflict` + `boundary_violation`
+- 조회·검색·필터 → `permission_denied` + `injection_or_security`
+- 권한·인증 관리 → `permission_denied` + `validation_failure`
+- 파일 업로드 → `validation_failure` + `boundary_violation` + `injection_or_security`
+- 결제·주문 → `validation_failure` + `duplicate_or_conflict` + `permission_denied`
+
+V10이 누락 카테고리를 식별하면 `TC_REGEN`이 해당 카테고리의 TC를 생성. 강제 적용 안 되는 leaf (read-only 등)는 V10 skip.
+
+### 6.5 failure_category 5분류 (D50 — 제안 #5 채택)
+
+FAIL TC를 자동으로 5enum으로 분류. V6 정적 + LLM 동적 통합:
+
+| enum | 의미 | 판정자 | 다음 조치 |
+|---|---|---|---|
+| `selector_broken` | 셀렉터 깨짐·timeout·NoSuchElement | V6 우선 → LLM | data-testid로 selector 보강 |
+| `scenario_error` | TC 시나리오 자체가 모순·매뉴얼 misread | LLM 전용 | `TC_REGEN` 대상 |
+| `expected_mismatch` | 기대값 추상·잘못된 값 | V6 우선 → LLM | invariants 보강 + `expected` 수정 |
+| `real_defect` | 진짜 제품 결함 (actual ≠ expected) | V6 우선 → LLM | `defect-catalog` 적재 |
+| `fictional_positive` | spec hallucination (source_quote=INFERRED인데 FAIL) | LLM 전용 | TC 폐기 + 매뉴얼 보강 권고 |
+
+**통합 흐름:**
+1. Stage 5 직후 V6가 셀렉터 점수 기반으로 `selector_broken`/`expected_mismatch`/`real_defect` 사전 마킹
+2. Stage 6에서 V6 미마킹 FAIL만 LLM이 5enum 부여 (토큰 절약)
+3. `failure_category_source` 필드로 출처 추적 (`v6_static` / `llm_failure_analysis` / `inferred_fallback`)
 
 ---
 
@@ -399,6 +438,8 @@ A. **.env(환경변수)가 우선**. 운영 시는 GUI 저장 권장, CI/CD에�
 | D44·D45·D46 | PostgreSQL + PySide6 + Inno Setup |
 | D47 | Phase 2 OSS = 그누보드5 |
 | **D48** | **LLM provider 추상화 — Anthropic/OpenAI/Gemini, 모델 prefix 자동 라우팅** |
+| **D49** | **negative_category 5enum + V10 강제 — leaf 적용 카테고리당 ≥ 1 TC (제안 #4)** |
+| **D50** | **failure_category 5enum — V6 정적 + LLM 동적 통합 (제안 #5)** |
 
 전체 결정 이력: `doc/06-decisions.md`
 
@@ -411,8 +452,8 @@ A. **.env(환경변수)가 우선**. 운영 시는 GUI 저장 권장, CI/CD에�
 | 1 | 결함 카탈로그 스키마 + 적재 | ✅ 완료 (5건 시드) |
 | 2 | domain-invariants YAML 채널 | ✅ 완료 (BOARD_CMS·USER_AUTH) |
 | 3 | V6 selector 안정성 점수 | ✅ 완료 (36 tests PASS) |
-| 4 | negative 카테고리별 minimum count 강제 | ⏸ 대기 |
-| 5 | 실패 TC 4분류 (selector/scenario/expected/fictional) | 부분 (V6에서 4분류, prompt 강화 미적용) |
+| 4 | negative 카테고리별 minimum count 강제 | ✅ 완료 (D49 — V10 + 5enum + 12 tests PASS) |
+| 5 | 실패 TC 4분류 → 5분류 enum | ✅ 완료 (D50 — V6+LLM 통합 + 14 tests PASS) |
 
 ### 핵심 미결정 (제안서가 가장 자주 빠뜨리는 결정으로 식별)
 - **patternProposal 작성을 프로젝트 종료 게이트에 강제할 것인가?**

@@ -1,6 +1,30 @@
-"""Stage 6 — 실패 TC 원인 분석 (LLM FAILURE_ANALYSIS 호출)."""
+"""Stage 6 — 실패 TC 원인 분석 (LLM FAILURE_ANALYSIS v2.0 호출).
+
+v2.0 변경 (D50):
+- failure_category 5enum 강제: selector_broken / scenario_error / expected_mismatch /
+                              real_defect / fictional_positive
+- V6 정적 분석 결과 우선 (이미 마킹된 TC는 LLM 호출 skip)
+- LLM 응답이 enum 위반 시 INFERRED 마킹
+"""
 from __future__ import annotations
 from typing import Callable
+
+# D50 — 허용 enum (5종)
+_VALID_FAILURE_CATEGORIES = frozenset({
+    "selector_broken",
+    "scenario_error",
+    "expected_mismatch",
+    "real_defect",
+    "fictional_positive",
+})
+
+# V6 → D50 매핑 (doc/03-tc-schema.md §6.2)
+_V6_TO_D50: dict[str, str] = {
+    "selector_unstable": "selector_broken",
+    "oracle_mismatch":   "expected_mismatch",
+    "app_defect":        "real_defect",
+    # "blocked"은 result=blocked로 별도 처리, failure_category 부여 안 함
+}
 
 
 def enhance(
@@ -8,7 +32,10 @@ def enhance(
     llm_client,
     progress_cb: Callable[[str], None] | None = None,
 ) -> list[dict]:
-    """result=fail인 TC에 failure_reason 4축을 채운다."""
+    """result=fail인 TC에 failure_reason 4축 + failure_category 5enum (D50)을 채운다.
+
+    V6 정적 분석이 이미 분류한 TC는 그 결과를 D50 enum으로 변환만 하고 LLM 호출 skip.
+    """
     def _cb(msg: str):
         if progress_cb:
             progress_cb(msg)
@@ -16,24 +43,59 @@ def enhance(
     failed = [tc for tc in tcs if tc.get("result") == "fail"]
     _cb(f"Stage 6: 실패 TC {len(failed)}개 원인 분석")
 
-    for i, tc in enumerate(failed, 1):
-        _cb(f"  분석 중 ({i}/{len(failed)}): {tc['tc_id']}")
+    # 1) V6 사전 마킹 처리 — LLM 호출 skip (토큰 절약, doc/03-tc-schema.md §6.1)
+    needs_llm: list[dict] = []
+    v6_resolved = 0
+    for tc in failed:
+        v6_cat = tc.get("failure_category", "")  # V6가 stage5 직후 채웠을 수 있음
+        if v6_cat in _V6_TO_D50:
+            tc["failure_category"] = _V6_TO_D50[v6_cat]
+            tc["failure_category_source"] = "v6_static"
+            v6_resolved += 1
+        else:
+            needs_llm.append(tc)
+
+    if v6_resolved:
+        _cb(f"  V6 사전 마킹: {v6_resolved}건 (LLM 호출 skip)")
+
+    # 2) 나머지 — LLM FAILURE_ANALYSIS 호출
+    for i, tc in enumerate(needs_llm, 1):
+        _cb(f"  분석 중 ({i}/{len(needs_llm)}): {tc['tc_id']}")
         result = llm_client.call("FAILURE_ANALYSIS", {
             "tc_id": tc["tc_id"],
             "scenario": tc.get("scenario", "")[:200],
             "precondition": tc.get("precondition", "")[:300],
             "expected_output": tc.get("expected", "")[:300],
             "actual_output": tc.get("actual", "")[:500],
+            "source_quote": tc.get("source_quote", "")[:200],
         })
 
+        # failure_reason 4축 보존
         parts = [
             f"[실제출력] {result.get('actual_output_summary', '')}",
             f"[차이] {result.get('difference', '')}",
             f"[원인후보] {', '.join(result.get('root_cause_candidates', []))}",
             f"[재시도] {result.get('retry_history', '없음')}",
         ]
+        # category_evidence가 있으면 추가 (D50 추적성)
+        if evidence := result.get("category_evidence", "").strip():
+            parts.append(f"[분류근거] {evidence}")
         tc["failure_reason"] = "\n".join(parts)
         tc["exec_confidence"] = result.get("exec_confidence", tc.get("exec_confidence", 0.0))
+
+        # D50 enum 검증
+        llm_cat = (result.get("failure_category", "") or "").strip()
+        if llm_cat in _VALID_FAILURE_CATEGORIES:
+            tc["failure_category"] = llm_cat
+            tc["failure_category_source"] = "llm_failure_analysis"
+        else:
+            # LLM이 enum 위반 또는 누락 — INFERRED 마킹
+            tc["failure_category"] = "fictional_positive" if (
+                str(tc.get("source_quote", "")).startswith("INFERRED")
+            ) else ""
+            tc["failure_category_source"] = (
+                "inferred_fallback" if tc["failure_category"] else "missing"
+            )
 
     _cb("Stage 6 완료")
     return tcs

@@ -6,6 +6,31 @@
 
 ## 1. 지금 어디까지 했나 (Last updated: 2026-05-20)
 
+### ✅ 외부 제안 #4·#5 적용 완료 (2026-05-20)
+
+| 구성 요소 | 파일 | 상태 |
+|---|---|---|
+| 설계 (D49 negative_category 5enum) | `doc/03-tc-schema.md` §7, `doc/06-decisions.md` | ✅ |
+| 설계 (D50 failure_category 5enum) | `doc/03-tc-schema.md` §6, `doc/06-decisions.md` | ✅ |
+| LLM Contract 갱신 | `doc/02-llm-contracts.md` 입출력 스키마 | ✅ |
+| V10 모듈 | `app/validation/v10_negative_coverage.py` | ✅ |
+| Stage 2 — negative_categories 입력 | `app/core/stage2_tc_design.py` | ✅ |
+| Stage 3 — V10 호출 | `app/core/stage3_verify.py` (V1~V10) | ✅ |
+| Stage 6 — V6+LLM 통합 분류 | `app/core/stage6_enhance.py` | ✅ |
+| Prompt — tc_design v2.1 | `prompts/tc_design.md` (D49 강제 추가) | ✅ |
+| Prompt — failure_analysis v2.0 | `prompts/failure_analysis.md` (D50 enum 강제) | ✅ |
+| Mock 클라이언트 갱신 | `app/api/mock_llm_client.py` (auto-infer 카테고리 + D50 정확 enum) | ✅ |
+| 단위 테스트 V10 | `tests/test_v10_negative_coverage.py` (12 PASS) | ✅ |
+| 단위 테스트 D50 | `tests/test_failure_classification.py` (14 PASS) | ✅ |
+| 매뉴얼 갱신 | `MANUAL.md` §6.2·6.4·6.5, 부록 A·B | ✅ |
+
+회귀 검증:
+- pytest 전체 **108개 PASS** (64 → +12 V10 + +14 D50 + 추가 baseline)
+- Mock 파이프라인 TC 79개·INFERRED 0% baseline 유지
+- V10 진단 결과: 26 leaf 중 8 PASS / 18 FAIL / 8 skip
+  - injection_or_security: 0건 (Mock 한계)
+  - 실 LLM 호출 시 prompt 강제로 카테고리 보강 예정
+
 ### ✅ LLM Provider 추상화 완료 (2026-05-20)
 
 | 구성 요소 | 파일 | 상태 |
