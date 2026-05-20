@@ -1,7 +1,23 @@
 # AWT 환경 설정 가이드 (다른 PC 재현용)
 
 > 이 문서 하나로 새 Windows PC에서 AWT 개발/실행 환경을 완전히 재현할 수 있다.  
-> 최종 갱신: 2026-05-19 | 검증 OS: Windows 11 Pro 23H2
+> 최종 갱신: 2026-05-20 | 검증 OS: Windows 11 Pro 23H2
+
+## ⚡ 원클릭 셋업 (권장)
+
+```powershell
+# 1. 저장소 클론
+git clone https://github.com/TTAJihoon/AutoWebTesting.git -b AWT-claude C:\Projects\AWT
+cd C:\Projects\AWT
+
+# 2. 원클릭 셋업 스크립트 실행
+Set-ExecutionPolicy RemoteSigned -Scope CurrentUser   # 최초 1회
+.\setup_dev.ps1
+```
+
+> `setup_dev.ps1` 이 자동으로: Python 패키지 설치 → Playwright 설치 → .env 생성 → Mock 파이프라인 검증 → pytest 실행
+
+---
 
 ---
 
@@ -74,12 +90,12 @@ winget install JrsoftwareInnoSetup.InnoSetup
 ## 2. 프로젝트 체크아웃
 
 ```powershell
-# OneDrive 경로 또는 원하는 위치
-git clone <AWT_REPO_URL> C:\Projects\AWT
+# 원하는 경로에 클론
+git clone https://github.com/TTAJihoon/AutoWebTesting.git -b AWT-claude C:\Projects\AWT
 cd C:\Projects\AWT
 ```
 
-> 현재는 OneDrive 동기화 방식: `C:\Users\<user>\OneDrive\Documents\AWT\`
+> OneDrive 동기화 방식으로 사용 중이라면: `C:\Users\<user>\OneDrive\Documents\AWT\`
 
 ---
 
