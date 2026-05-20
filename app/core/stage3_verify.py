@@ -138,11 +138,15 @@ def verify(
     str_remain   = [f for f in remaining if f["v"] != "V10"]
     v10_remain   = [f for f in remaining if f["v"] == "V10"]
 
-    failed_ids = {f["tc_id"] for f in str_remain}
+    # V1 개별 실패만 INFERRED 마킹 — V2(인용 불일치)·V3(비율)·V4·V5는 MANUAL TC를 강등하지 않음
+    # MANUAL/INVARIANT source_quote는 max_retry_exceeded로 절대 교체 금지
+    v1_failed_ids = {f["tc_id"] for f in str_remain if f["v"] == "V1"}
     for tc in tcs:
-        if tc.get("tc_id") in failed_ids:
-            tc["source_quote"]  = "INFERRED: max_retry_exceeded"
-            tc["review_status"] = "pending"
+        if tc.get("tc_id") in v1_failed_ids:
+            existing_sq = str(tc.get("source_quote", ""))
+            if not existing_sq.startswith(("MANUAL:", "INVARIANT:", "DEFECT:")):
+                tc["source_quote"]  = "INFERRED: max_retry_exceeded"
+                tc["review_status"] = "pending"
 
     # V10 gap이 남아 있어도 마지막으로 한 번 TC 추가 시도
     if v10_remain:
