@@ -142,6 +142,10 @@ def verify(
                     f"적용 {result.applicable} / 커버 {result.covered} / 누락 {result.missing} "
                     f"(coverage {result.coverage_ratio:.0%}, 임계 {min_coverage:.0%})"
                 ),
+                # 구조화 필드 — stage3 _add_v10_tcs()에서 파싱 없이 사용
+                "leaf_rid": rid,
+                "leaf_name": result.leaf_name,
+                "missing_categories": list(result.missing),
             })
     return failures
 

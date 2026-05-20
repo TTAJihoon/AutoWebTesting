@@ -38,7 +38,7 @@
 | Stage 0 | URL + (선택) 인증정보 | DOM 기반 기능 명세 초안 |
 | Stage 1 | 매뉴얼 파일 (md/pdf/docx) | leaf 기능 목록 (예: 26개) |
 | Stage 2 | leaf 기능 + 매뉴얼 발췌 + 자산 (결함카탈로그·invariants) | TC 목록 (예: 79개) |
-| Stage 3 | TC 목록 | V1~V5 검증 + INFERRED 임계 적용 |
+| Stage 3 | TC 목록 | V1~V5·V10 검증 + 누락 카테고리 TC 자동 추가 |
 | Stage 4 | TC + Reviewer Gate (사람) | approved / edited / rejected / pending 결정 |
 | Stage 5 | approved/edited TC + Playwright | 실제 브라우저 자동 실행 + PASS/FAIL |
 | Stage 6 | FAIL TC + LLM | 실패 원인 4축 분석 |
@@ -272,7 +272,7 @@ data/runs/<run_id>/
 | **selector_stability_score** | V6 — 자동 실행 안정성 | ≥ 0.62 (data-testid 또는 text_exact 기반) | DOM 안정 selector 권고 |
 | **oracle_clarity_score** | V6 — 기대값 명료도 | ≥ 0.65 | 추상 표현 제거, 구체값 |
 | **exec_confidence** | 자동 실행 결과 신뢰도 | ≥ 0.70 | retry 또는 manual 재검토 |
-| **negative_category 커버리지 (V10)** | leaf 적용 카테고리 중 충족 비율 (D49) | ≥ 60%, 각 카테고리당 ≥ 1 TC | TC_REGEN으로 누락 카테고리 추가 |
+| **negative_category 커버리지 (V10)** | leaf 적용 카테고리 중 충족 비율 (D49) | ≥ 60%, 각 카테고리당 ≥ 1 TC | TC_DESIGN 재호출로 누락 카테고리 TC 자동 추가 |
 | **failure_category (D50)** | FAIL TC 5enum 분류 | `selector_broken` / `scenario_error` / `expected_mismatch` / `real_defect` / `fictional_positive` | 분류별 후속 조치 (§6.4) |
 
 ### 6.3 source_quote 3단계 출처 (자산 저장소)
@@ -301,7 +301,7 @@ LLM이 음성 케이스를 *깊이 있게* 만들도록 5카테고리 강제. �
 - 파일 업로드 → `validation_failure` + `boundary_violation` + `injection_or_security`
 - 결제·주문 → `validation_failure` + `duplicate_or_conflict` + `permission_denied`
 
-V10이 누락 카테고리를 식별하면 `TC_REGEN`이 해당 카테고리의 TC를 생성. 강제 적용 안 되는 leaf (read-only 등)는 V10 skip.
+V10이 누락 카테고리를 식별하면 **`TC_DESIGN`을 재호출**해 해당 카테고리 TC만 추가 생성한다. (`TC_REGEN`은 기존 TC를 고치는 것이므로 V10 gap 보완에는 사용하지 않음.) 강제 적용 안 되는 leaf (read-only 등)는 V10 skip.
 
 ### 6.5 failure_category 5분류 (D50 — 제안 #5 채택)
 

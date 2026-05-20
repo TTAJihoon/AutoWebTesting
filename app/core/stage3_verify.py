@@ -1,6 +1,11 @@
 """Stage 3 — V1~V10 검증 + 실패 시 TC_REGEN 재호출 (doc/03-tc-schema.md §5).
 
 V10 추가 (D49): negative 카테고리 커버리지 강제.
+
+아키텍처 노트 (Bug-1 수정):
+  V10 실패 tc_id = "LEAF:F001" 형식 → 실제 TC id와 매칭 안 됨.
+  V10은 기존 TC를 고치는 게 아니라 누락 카테고리 TC를 *추가* 해야 하므로
+  TC_REGEN 루프에서 분리, _add_v10_tcs()로 별도 처리.
 """
 from __future__ import annotations
 import re
@@ -40,36 +45,65 @@ def verify(
             progress_cb(msg)
 
     for attempt in range(1, max_retries + 1):
-        failures = _check_all(tcs, manual_text, leaves, inferred_threshold)
-        if not failures:
+        all_failures = _check_all(tcs, manual_text, leaves, inferred_threshold)
+
+        # V10 (카테고리 추가) vs 구조적 오류 (V1-V5, TC_REGEN 대상) 분리
+        structural = [f for f in all_failures if f["v"] != "V10"]
+        v10_gaps   = [f for f in all_failures if f["v"] == "V10"]
+
+        if not structural:
+            # 구조적 오류 없음 — V10 gap만 남은 경우 TC 추가 후 완료
+            if v10_gaps:
+                _cb(f"  V10 커버리지 부족 {len(v10_gaps)}개 leaf — 누락 카테고리 TC 추가 생성")
+                new_tcs = _add_v10_tcs(v10_gaps, leaves, manual_text, tcs, llm_client, _cb)
+                tcs.extend(new_tcs)
             _cb(f"Stage 3 완료 (시도 {attempt}회) — 모든 검증 통과")
             return tcs
 
-        _cb(f"  V 실패 {len(failures)}건 (시도 {attempt}/{max_retries}) — TC_REGEN 호출")
-        failed_ids = {f["tc_id"] for f in failures}
-        failed_tcs = [tc for tc in tcs if tc.get("tc_id") in failed_ids]
+        # V1-V5 구조적 실패 → TC_REGEN
+        _cb(f"  구조적 실패 {len(structural)}건 (시도 {attempt}/{max_retries}) — TC_REGEN 호출")
+        failed_ids  = {f["tc_id"] for f in structural}
+        failed_tcs  = [tc for tc in tcs if tc.get("tc_id") in failed_ids]
 
-        fix_instructions = _build_fix_instructions(failures)
+        fix_instructions = _build_fix_instructions(structural)
         regen_result = llm_client.call("TC_REGEN", {
             "failed_tcs_json": str(failed_tcs)[:3000],
-            "v_failures": str(failures)[:600],
+            "v_failures":      str(structural)[:600],
             "fix_instructions": fix_instructions[:400],
         })
 
-        # 재생성된 TC로 교체
-        regen_map = {tc["tc_id"]: tc for tc in regen_result.get("tcs", [])}
+        # 재생성된 TC로 교체 + 필드 정규화
+        regen_map = {}
+        for tc in regen_result.get("tcs", []):
+            # TC_REGEN 출력 필드 → 내부 스키마 정규화 (stage2와 동일)
+            if "expected_output" in tc and "expected" not in tc:
+                tc["expected"] = tc.pop("expected_output")
+            if "technique" in tc and "design_technique" not in tc:
+                tc["design_technique"] = tc.pop("technique")
+            regen_map[tc["tc_id"]] = tc
+
         for i, tc in enumerate(tcs):
             if tc.get("tc_id") in regen_map:
                 tcs[i] = {**tc, **regen_map[tc["tc_id"]]}
 
-    # 최대 재시도 초과 — INFERRED 마킹
-    _cb("Stage 3: 최대 재시도 초과 — 잔여 실패 TC를 INFERRED 마킹")
-    remaining = _check_all(tcs, manual_text, leaves, inferred_threshold)
-    failed_ids = {f["tc_id"] for f in remaining}
+    # 최대 재시도 초과 — 구조적 잔여 실패만 INFERRED 마킹
+    _cb("Stage 3: 최대 재시도 초과 — 구조적 잔여 실패 TC를 INFERRED 마킹")
+    remaining    = _check_all(tcs, manual_text, leaves, inferred_threshold)
+    str_remain   = [f for f in remaining if f["v"] != "V10"]
+    v10_remain   = [f for f in remaining if f["v"] == "V10"]
+
+    failed_ids = {f["tc_id"] for f in str_remain}
     for tc in tcs:
         if tc.get("tc_id") in failed_ids:
-            tc["source_quote"] = "INFERRED: max_retry_exceeded"
+            tc["source_quote"]  = "INFERRED: max_retry_exceeded"
             tc["review_status"] = "pending"
+
+    # V10 gap이 남아 있어도 마지막으로 한 번 TC 추가 시도
+    if v10_remain:
+        _cb(f"  V10 gap {len(v10_remain)}개 leaf — 최후 TC 추가 시도")
+        new_tcs = _add_v10_tcs(v10_remain, leaves, manual_text, tcs, llm_client, _cb)
+        tcs.extend(new_tcs)
+
     return tcs
 
 
@@ -82,6 +116,121 @@ def _check_all(tcs, manual_text, leaves, inferred_threshold) -> list[dict]:
     failures += _v5(tcs, leaves)
     failures += _v10(tcs, leaves)
     return failures
+
+
+def _add_v10_tcs(
+    v10_gaps: list[dict],
+    leaves: list[dict],
+    manual_text: str,
+    existing_tcs: list[dict],
+    llm_client,
+    _cb,
+) -> list[dict]:
+    """V10 커버리지 부족 leaf에 누락 카테고리 TC를 추가 생성.
+
+    TC_REGEN 대신 TC_DESIGN을 재호출해 누락 카테고리만 타깃으로 새 TC를 만든다.
+    기존 TC와 ID 충돌 방지를 위해 leaf별 최대 번호 + 1로 시작.
+    """
+    # lazy imports — stage2 유틸 재사용, 순환 의존 방지
+    from app.core.stage1_ingest import excerpt_for_leaf
+    from app.assets.invariants_loader import load_invariants_multi, format_for_llm as fmt_inv
+    from app.assets.defect_catalog import search_similar_defects, format_for_llm as fmt_def
+    from app.assets.product_types import classify_product_types
+    from app.core.stage2_tc_design import (
+        _CATEGORY_DESCRIPTIONS, _guess_feature_type,
+    )
+
+    leaf_by_rid = {lf["requirement_id"]: lf for lf in leaves}
+    leaf_to_idx = {lf["requirement_id"]: i + 1 for i, lf in enumerate(leaves)}
+
+    # 기존 TC ID 최대 번호 (leaf별)
+    existing_max: dict[str, int] = {}
+    for tc in existing_tcs:
+        rid = tc.get("requirement_id", "")
+        m = re.match(r"TC-\d{3}-(\d{3})$", tc.get("tc_id", ""))
+        if m and rid:
+            existing_max[rid] = max(existing_max.get(rid, 0), int(m.group(1)))
+
+    # 제품 유형·불변 규칙 (공통)
+    product_type_ids = classify_product_types(manual_text)
+    inv_map = load_invariants_multi(product_type_ids)
+
+    new_tcs: list[dict] = []
+    for gap in v10_gaps:
+        rid     = gap.get("leaf_rid", "")
+        missing = gap.get("missing_categories", [])
+        leaf    = leaf_by_rid.get(rid)
+        if not leaf or not missing:
+            _cb(f"  V10 gap skip (leaf 없음): rid={rid}")
+            continue
+
+        leaf_idx  = leaf_to_idx.get(rid, 1)
+        leaf_num  = f"{leaf_idx:03d}"
+        next_num  = existing_max.get(rid, 0) + 1
+        tc_id_start = f"TC-{leaf_num}-{next_num:03d}"
+
+        missing_desc = "\n".join(
+            f"- {c}: {_CATEGORY_DESCRIPTIONS.get(c, '')}" for c in missing
+        )
+        cats_text = (
+            f"V10 커버리지 보완 — 아래 카테고리 각 ≥ 1 TC를 추가 생성해야 함:\n"
+            f"{missing_desc}"
+        )
+
+        feature_type    = _guess_feature_type(leaf["category_leaf"])
+        invariants_text = fmt_inv(inv_map, feature_type=feature_type)
+        similar_defects = search_similar_defects(product_type_ids, feature_type, top_k=2)
+        defects_text    = fmt_def(similar_defects)
+        excerpt         = excerpt_for_leaf(manual_text, leaf)
+
+        _cb(f"  V10 보완 TC 생성: {leaf['category_leaf']} 누락={missing}")
+        result = llm_client.call("TC_DESIGN", {
+            "category_major": leaf["category_major"],
+            "category_mid":   leaf["category_mid"],
+            "category_leaf":  leaf["category_leaf"],
+            "requirement_id": rid,
+            "tc_id_start":    tc_id_start,
+            "manual_excerpt": excerpt[:1500],
+            "domain_invariants":    invariants_text or "(없음)",
+            "similar_past_defects": defects_text or "(없음)",
+            "negative_categories":  cats_text,
+        })
+
+        for tc in result.get("tcs", []):
+            # 출력 필드 정규화
+            if "expected_output" in tc and "expected" not in tc:
+                tc["expected"] = tc.pop("expected_output")
+            if "technique" in tc and "design_technique" not in tc:
+                tc["design_technique"] = tc.pop("technique")
+            # G1
+            tc["대분류"]        = leaf["category_major"]
+            tc["중분류"]        = leaf["category_mid"]
+            tc["소분류"]        = leaf["category_leaf"]
+            tc["requirement_id"] = rid
+            # G4
+            tc.setdefault("review_status", "pending")
+            tc.setdefault("reviewer_note", "")
+            tc.setdefault("reviewer_id",  "")
+            # G5
+            tc.setdefault("actual", "")
+            tc.setdefault("result", "not_executed")
+            tc.setdefault("failure_reason", "")
+            tc.setdefault("exec_confidence", 0.0)
+            tc.setdefault("failure_category", "")
+            tc.setdefault("failure_category_source", "")
+            # G6
+            if tc.get("design_technique", "").startswith("negative_"):
+                tc.setdefault("negative_category", "")
+            else:
+                tc.setdefault("negative_category", None)
+            new_tcs.append(tc)
+
+            # 최대 번호 갱신 (다음 gap 처리 시 충돌 방지)
+            m = re.match(r"TC-\d{3}-(\d{3})$", tc.get("tc_id", ""))
+            if m:
+                existing_max[rid] = max(existing_max.get(rid, 0), int(m.group(1)))
+
+    return new_tcs
 
 
 def _v10(tcs: list[dict], leaves: list[dict]) -> list[dict]:
