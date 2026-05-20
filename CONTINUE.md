@@ -6,7 +6,34 @@
 
 ## 1. 지금 어디까지 했나 (Last updated: 2026-05-20)
 
-### 🟡 Gemini 3.5 Flash 실전 실행 — Stage 2 중단 (2026-05-20)
+### ✅ Stage 1~3 실전 실행 완료 — INFERRED 29.7% (2026-05-20)
+
+| 단계 | 상태 | 내용 |
+|---|---|---|
+| Stage 1 | ✅ | 그누보드5 매뉴얼 파싱 — leaf 26개 추출 |
+| Stage 2 | ✅ | TC 101개 생성 (gemini-3.1-flash-lite, 캐시 재사용) |
+| Stage 3 | ✅ | INFERRED **29.7%** ≤ 30% 임계값 통과 |
+
+**최종 run: `data/runs/2c9b0cc4/`**
+- `tc_raw.json` — Stage 2 원본 101개 (INFERRED 33개)
+- `tc_verified.json` — Stage 3 검증 101개 (INFERRED **30개**)
+- `tc_review.xlsx` — Reviewer Gate용 Excel ← **다음 단계 입력**
+
+**TC_REGEN 5개 버그 수정 (이번 세션):**
+
+| 커밋 | 버그 | 효과 |
+|---|---|---|
+| `c2a2f27` | V3 REGEN 대상 TC 선별 오류 (tc_id="ALL" 매칭 실패) | REGEN 활성화 |
+| `be53402` | TC_REGEN에 manual_excerpt 없음 → MANUAL 인용 불가 | INFERRED→MANUAL 변환 가능 |
+| `39b2341` | REGEN이 MANUAL source_quote를 INFERRED로 강등 | MANUAL TC 보호 |
+| `fb1d910` | TC_REGEN 캐시 히트로 재시도 전부 무효 | use_cache=False |
+| `5e6ddd5` | max_retry_exceeded가 MANUAL TC를 INFERRED로 강제 마킹 | V1 전용 마킹으로 제한 |
+
+**REGEN 효과: raw 33개 → verified 30개 (TC-003-002·004-004·005-004 MANUAL 변환)**
+
+---
+
+### 🟡 Gemini 3.5 Flash 실전 실행 — Stage 2 중단 (2026-05-20, 참고용)
 
 | 단계 | 상태 | 내용 |
 |---|---|---|
@@ -212,15 +239,23 @@ Mock 파이프라인 재검증 결과 (2026-05-20):
 
 **→ 새 PC라면 `SETUP.md`를 먼저 읽어라.**
 
-### 최우선: Gemini 실전 실행 재개
+### 최우선: Phase 2 — Stage 4 Reviewer Gate → Stage 5~7 실행
+
+**Stage 1~3 완료** — 다음 단계:
 
 ```powershell
-# quota 잔여량 확인 후 실행 (UTC 자정 리셋)
-# https://aistudio.google.com/quota
+# Stage 4: Reviewer Gate (GUI 앱 또는 Excel 직접 검토)
+# → data\runs\2c9b0cc4\tc_review.xlsx 열어서 A/E/R/P 결정
 
-python scripts\resume_gemini_run.py
-# 예상 소요: ~1분 (4회 API 호출 × 13초 간격 + Stage 3)
-# 산출물: data\runs\gemini35_run_01\tc_verified.json + tc_review.xlsx
+# Stage 5~7: Docker + gnuboard5 필요
+winget install Docker.DockerDesktop     # 설치 후 재부팅
+.\data\oss\gnuboard5\setup.ps1         # gnuboard5 Docker 셋업
+# → http://localhost:8080/install 에서 초기 설치
+
+python scripts\run_full_pipeline.py `
+    --url http://localhost:8080 `
+    --manual data\oss\gnuboard5\manual\gnuboard5_spec.md `
+    --auth-id admin --auth-pw <비밀번호>
 ```
 
 ### Phase 2 전체 실행 순서
