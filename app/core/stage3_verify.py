@@ -39,7 +39,7 @@ def verify(
     manual_text: str,
     llm_client,
     leaves: list[dict],
-    max_retries: int = 3,
+    max_retries: int = 5,
     inferred_threshold: float = INFERRED_THRESHOLD,
     progress_cb: Callable[[str], None] | None = None,
 ) -> list[dict]:
