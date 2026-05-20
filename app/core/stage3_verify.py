@@ -99,12 +99,14 @@ def verify(
         fix_instructions = _build_fix_instructions(structural)
         # manual_excerpt: failed_tcs의 requirement_id에 해당하는 매뉴얼 발췌문
         manual_excerpt = _extract_manual_for_tcs(failed_tcs, manual_text)
+        # TC_REGEN은 캐시 불사용 — 동일 입력이라도 재시도마다 새 API 호출 필요
+        # (캐시 히트 시 동일 실패 결과 반복 → 재시도 무의미해짐)
         regen_result = llm_client.call("TC_REGEN", {
             "manual_excerpt":   manual_excerpt[:2000],
             "failed_tcs_json":  str(failed_tcs)[:_REGEN_TC_JSON_LIMIT],
             "v_failures":       str(structural)[:800],
             "fix_instructions": fix_instructions[:400],
-        })
+        }, use_cache=False)
 
         # 재생성된 TC로 교체 + 필드 정규화
         regen_map = {}
