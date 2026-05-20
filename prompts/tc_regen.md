@@ -35,6 +35,7 @@ max_output_tokens: 4000
 - tc_id는 원본과 동일하게 유지 (교체 대상임)
 - source_quote를 INFERRED에서 MANUAL로 바꿀 때는 반드시 아래 매뉴얼 발췌문에서 직접 인용할 것
 - 매뉴얼에 근거가 없으면 INFERRED: <근거설명> 형태를 유지하되 gen_confidence를 낮게 설정
+- ⚠️ 중요: 원본 source_quote가 MANUAL: 또는 INVARIANT:로 시작하면 절대 변경 금지 — source_quote 개선은 INFERRED 항목에만 적용
 
 [User]
 ## 매뉴얼 발췌 (source_quote 인용 시 참고)

@@ -118,7 +118,14 @@ def verify(
 
         for i, tc in enumerate(tcs):
             if tc.get("tc_id") in regen_map:
-                tcs[i] = {**tc, **regen_map[tc["tc_id"]]}
+                merged = {**tc, **regen_map[tc["tc_id"]]}
+                # source_quote 강등 방지: MANUAL/INVARIANT → INFERRED 로의 교체 차단
+                orig_sq = str(tc.get("source_quote", ""))
+                new_sq  = str(merged.get("source_quote", ""))
+                if (orig_sq.startswith(("MANUAL:", "INVARIANT:", "DEFECT:"))
+                        and _classify_source_quote(new_sq) == "inferred"):
+                    merged["source_quote"] = orig_sq  # 원본 복원
+                tcs[i] = merged
 
     # 최대 재시도 초과 — 구조적 잔여 실패만 INFERRED 마킹
     _cb("Stage 3: 최대 재시도 초과 — 구조적 잔여 실패 TC를 INFERRED 마킹")
