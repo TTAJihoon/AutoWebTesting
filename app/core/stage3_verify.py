@@ -63,7 +63,29 @@ def verify(
         # V1-V5 구조적 실패 → TC_REGEN
         _cb(f"  구조적 실패 {len(structural)}건 (시도 {attempt}/{max_retries}) — TC_REGEN 호출")
         failed_ids  = {f["tc_id"] for f in structural}
-        failed_tcs  = [tc for tc in tcs if tc.get("tc_id") in failed_ids]
+
+        # "ALL" 실패(V3/V4/V5)는 tc_id가 "ALL"로 기록됨 → 실제 대상 TC 선별
+        has_all_failure = "ALL" in failed_ids
+        failed_ids.discard("ALL")
+
+        if has_all_failure:
+            vs_all = {f["v"] for f in structural if f["tc_id"] == "ALL"}
+            if "V3" in vs_all:
+                # V3: INFERRED 비율 초과 → INFERRED TC만 재생성
+                for tc in tcs:
+                    if _classify_source_quote(str(tc.get("source_quote", ""))) == "inferred":
+                        failed_ids.add(tc["tc_id"])
+            if "V4" in vs_all:
+                # V4: happy_path 비율 초과 → happy_path TC 일부 재생성
+                hp_tcs = [tc for tc in tcs if tc.get("design_technique") == "happy_path"]
+                for tc in hp_tcs[len(hp_tcs)//2:]:   # 후반 절반만 대상
+                    failed_ids.add(tc["tc_id"])
+            if "V5" in vs_all:
+                # V5: leaf 미커버 → 전체 재생성 (어느 TC를 수정해야 할지 불명확)
+                for tc in tcs:
+                    failed_ids.add(tc["tc_id"])
+
+        failed_tcs = [tc for tc in tcs if tc.get("tc_id") in failed_ids]
 
         fix_instructions = _build_fix_instructions(structural)
         regen_result = llm_client.call("TC_REGEN", {
