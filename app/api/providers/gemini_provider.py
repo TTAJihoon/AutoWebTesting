@@ -31,8 +31,9 @@ class GeminiProvider(LLMProvider):
         from google.genai import types
 
         m = model.lower()
-        _is_gemini2 = m.startswith("gemini-2.")
-        _is_gemma   = m.startswith("gemma-")
+        # gemma-* 제외, gemini-* 계열은 버전 무관 모두 thinking 비활성화 대상
+        _is_gemini = m.startswith("gemini-")
+        _is_gemma  = m.startswith("gemma-")
 
         config_kwargs: dict = {"max_output_tokens": max_tokens}
 
@@ -49,8 +50,9 @@ class GeminiProvider(LLMProvider):
         elif json_mode and _is_gemma:
             contents += "\n\n반드시 JSON만 출력하고 다른 텍스트는 포함하지 마세요."
 
-        # thinking_budget=0: gemini-2.x Flash/Pro 전용 (thinking 토큰이 JSON 예산 잠식 방지)
-        if _is_gemini2:
+        # thinking_budget=0: gemini-* 전 계열 (2.x / 3.x 포함)
+        # thinking 토큰이 max_output_tokens 예산을 잠식해 JSON 중간 절단되는 문제 방지
+        if _is_gemini:
             try:
                 config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
             except (AttributeError, TypeError):

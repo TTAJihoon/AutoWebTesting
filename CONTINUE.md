@@ -6,6 +6,36 @@
 
 ## 1. 지금 어디까지 했나 (Last updated: 2026-05-20)
 
+### 🟡 Stage 5 대기 중 — WSL2 설치 필요 (2026-05-21)
+
+**현재 상태:**
+- Stage 1~3: ✅ 완료 (`data/runs/c0995b8b/`, TC 111개, INFERRED 30.6%)
+- Stage 4~7: ✅ 로직 검증 완료 (Stage 5 skip 모드, `tc_final.xlsx` 생성됨)
+- Stage 5 실행: ⏸ **WSL2 미설치로 Docker 미작동** → 설치 후 재개
+
+**Stage 5 재개 방법 (WSL2 설치 후):**
+```powershell
+# 1. 그누보드5 Docker 시작
+docker compose -f data\oss\gnuboard5\docker-compose.yml up -d
+
+# 2. 브라우저에서 http://localhost:8080/install 에서 초기 설치
+#    DB서버: db / DB이름: gnuboard5 / 아이디: gnuboard / 비밀번호: gnuboard
+
+# 3. Stage 4~7 실행 (Stage 5 포함)
+python scripts\run_stage47.py --url http://localhost:8080 --auth-id admin --auth-pw <비밀번호>
+```
+
+**WSL2 설치 방법 (관리자 PowerShell):**
+```powershell
+wsl --install          # WSL2 + Ubuntu 설치
+# 재부팅 후 Docker Desktop 재시작 → 자동으로 WSL2 엔진 사용
+```
+
+**신규 스크립트:**
+- `scripts/run_stage47.py` — Stage 3 완료 후 4~7 재개 원클릭 실행
+
+---
+
 ### ✅ Stage 1~3 실전 실행 완료 — INFERRED 29.7% (2026-05-20)
 
 | 단계 | 상태 | 내용 |

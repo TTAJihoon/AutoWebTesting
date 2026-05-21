@@ -37,6 +37,12 @@ import sys
 import time
 from pathlib import Path
 
+# Windows cp949 터미널에서 한글/특수문자 인코딩 오류 방지
+if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+
 # .env 자동 로드
 try:
     from dotenv import load_dotenv
@@ -115,8 +121,8 @@ def main() -> None:
     print(f"  매뉴얼   : {manual_path.name}")
     print(f"  임계값   : INFERRED ≤ {args.threshold:.0%}")
     print(f"{'='*60}")
-    print(f"  ℹ  캐시된 leaf (F001~F022)는 API 호출 없이 즉시 로드됩니다.")
-    print(f"  ℹ  gemini-3.5-flash 일일 quota: 20 req/day (UTC 자정 리셋)")
+    print(f"  [i] 캐시된 leaf (F001~F022)는 API 호출 없이 즉시 로드됩니다.")
+    print(f"  [i] gemini-3.5-flash 일일 quota: 20 req/day (UTC 자정 리셋)")
     print(f"{'='*60}")
 
     orch = Orchestrator(config, progress_cb=_cb)

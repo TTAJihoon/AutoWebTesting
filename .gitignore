@@ -67,3 +67,6 @@ temp/
 
 # But keep PoC outputs (they're work products to commit)
 !data/poc/
+
+# 외부 소스 (git clone으로 별도 관리)
+data/oss/gnuboard5/app/

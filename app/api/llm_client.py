@@ -26,11 +26,13 @@ class LLMClient:
 
     # 모델별 최소 호출 간격(초) — free tier RPM 기반
     _MIN_INTERVAL: dict[str, float] = {
-        "gemini-3.5-flash":    13.0,  # 5 RPM → 60/5 = 12s + 1s 여유
-        "gemini-2.5-flash":    13.0,
-        "gemini-2.5-flash-lite": 6.0,
-        "gemini-2.0-flash":    6.0,
-        "gemini-1.5-flash":    5.0,
+        "gemini-3.5-flash":      13.0,  # 5 RPM → 60/5 = 12s + 1s 여유
+        "gemini-3.1-flash-lite":  6.0,  # 10 RPM → 60/10 = 6s
+        "gemini-2.5-flash":      13.0,
+        "gemini-2.5-flash-lite":  6.0,
+        "gemini-2.0-flash":       6.0,
+        "gemini-2.0-flash-lite":  6.0,
+        "gemini-1.5-flash":       5.0,
     }
 
     def __init__(

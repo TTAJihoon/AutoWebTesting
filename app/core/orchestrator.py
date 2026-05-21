@@ -173,6 +173,31 @@ class Orchestrator:
         self.run_stage6()
         return self.run_stage7()
 
+    def load_from_stage3(self, run_id: str | None = None) -> bool:
+        """기존 tc_verified.json 로드 — Stage 4부터 재개할 때 사용.
+
+        Args:
+            run_id: 불러올 run ID. None이면 self.config.run_id 사용.
+        Returns:
+            True if loaded successfully, False otherwise.
+        """
+        import json
+        target_run = run_id or self.config.run_id
+        path = RUNS_DIR / target_run / "tc_verified.json"
+        if not path.exists():
+            return False
+        self.tcs = json.loads(path.read_text(encoding="utf-8"))
+        # ingest_result 복원: manual.txt 에서 재파싱
+        manual_path = RUNS_DIR / target_run / "ingest" / "manual.txt"
+        if manual_path.exists():
+            manual_text = manual_path.read_text(encoding="utf-8")
+            from app.core import stage1_ingest
+            leaves = stage1_ingest._extract_leaves_from_text(manual_text)
+            self.ingest_result = {"manual_text": manual_text, "leaves": leaves}
+        self.run_dir = RUNS_DIR / target_run
+        self._stage = 3
+        return True
+
     def _save_intermediate(self, name: str) -> None:
         import json
         path = self.run_dir / f"{name}.json"
