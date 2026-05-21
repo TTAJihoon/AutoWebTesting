@@ -6,33 +6,36 @@
 
 ## 1. 지금 어디까지 했나 (Last updated: 2026-05-20)
 
-### 🟡 Stage 5 대기 중 — WSL2 설치 필요 (2026-05-21)
+### ✅ Phase 2 end-to-end 완료 — Stage 0~7 전체 검증 (2026-05-21)
 
-**현재 상태:**
-- Stage 1~3: ✅ 완료 (`data/runs/c0995b8b/`, TC 111개, INFERRED 30.6%)
-- Stage 4~7: ✅ 로직 검증 완료 (Stage 5 skip 모드, `tc_final.xlsx` 생성됨)
-- Stage 5 실행: ⏸ **WSL2 미설치로 Docker 미작동** → 설치 후 재개
+**최종 결과 (run: `data/runs/c0995b8b/`):**
 
-**Stage 5 재개 방법 (WSL2 설치 후):**
+| 단계 | 상태 | 내용 |
+|---|---|---|
+| Stage 1 | ✅ | leaf 26개 추출 |
+| Stage 2 | ✅ | TC 111개 생성 (gemini-3.1-flash-lite) |
+| Stage 3 | ✅ | INFERRED 30.6% |
+| Stage 4 | ✅ | 111개 전체 자동 승인 |
+| Stage 5 | ✅ | PASS 5 / FAIL 106 / BLOCKED 0 |
+| Stage 6 | ✅ | V6 사전 분류: app_defect 100 / oracle_mismatch 5 / selector_unstable 1 |
+| Stage 7 | ✅ | `tc_final.xlsx` 생성 |
+
+**Stage 5 결과 해석:**
+- FAIL 106건은 gnuboard5 자체 버그가 아님 — Stage 5 shallow 실행(메인 페이지 키워드 매칭) 한계
+- Stage 5는 현재 `page.goto(base_url)` + `inner_text("body")` 키워드 검사만 수행
+- 실제 TC 시나리오(폼 입력, 네비게이션, 액션 수행)는 Phase 3 고도화 대상
+
+**재실행 방법 (다음 세션):**
 ```powershell
-# 1. 그누보드5 Docker 시작
+# gnuboard5 이미 설치됨 — 컨테이너만 재시작하면 됨
 docker compose -f data\oss\gnuboard5\docker-compose.yml up -d
 
-# 2. 브라우저에서 http://localhost:8080/install 에서 초기 설치
-#    DB서버: db / DB이름: gnuboard5 / 아이디: gnuboard / 비밀번호: gnuboard
-
-# 3. Stage 4~7 실행 (Stage 5 포함)
-python scripts\run_stage47.py --url http://localhost:8080 --auth-id admin --auth-pw <비밀번호>
+python scripts\run_stage47.py --url http://localhost:8080 --auth-id admin --auth-pw Gnuboard5!
 ```
 
-**WSL2 설치 방법 (관리자 PowerShell):**
-```powershell
-wsl --install          # WSL2 + Ubuntu 설치
-# 재부팅 후 Docker Desktop 재시작 → 자동으로 WSL2 엔진 사용
-```
-
-**신규 스크립트:**
-- `scripts/run_stage47.py` — Stage 3 완료 후 4~7 재개 원클릭 실행
+**주요 신규 스크립트:**
+- `scripts/run_stage47.py` — Stage 3 산출물에서 Stage 4~7 재개 원클릭
+- `scripts/resume_gemini_run.py` — Gemini Stage 1~3 재개
 
 ---
 
