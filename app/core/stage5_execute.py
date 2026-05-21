@@ -68,14 +68,20 @@ def _run_tc(page: Page, tc: dict, base_url: str) -> None:
 
         # 기대 출력 검증
         expected = tc.get("expected", "")
-        actual_text = page.content()[:2000]
+        # inner_text(): JS 렌더링 후 가시 텍스트만 추출 (head CSS/JS 제외)
+        # 전체 body 텍스트를 사용해 한국어 키워드 매칭 정확도 향상
+        try:
+            actual_text = page.inner_text("body") or ""
+        except Exception:
+            actual_text = page.content()
+        actual_snippet = actual_text[:500]  # 로그용 일부
 
         if expected and any(kw in actual_text for kw in _key_phrases(expected)):
             tc["result"] = "pass"
             tc["actual"] = f"기대 패턴 확인: {expected[:100]}"
         else:
             tc["result"] = "fail"
-            tc["actual"] = f"페이지 내용 일부: {actual_text[:300]}"
+            tc["actual"] = f"페이지 텍스트 일부: {actual_snippet}"
 
         elapsed = time.time() - start
         tc["exec_confidence"] = min(1.0, round(0.9 - elapsed * 0.01, 2))
