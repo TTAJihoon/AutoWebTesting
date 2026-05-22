@@ -1,7 +1,10 @@
 """파이프라인 실행 진행 창 — Stage 0~7 실시간 로그 (D45: PySide6)."""
 from __future__ import annotations
 import json
+import traceback
+from datetime import datetime
 from pathlib import Path
+
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QFont, QColor
 from PySide6.QtWidgets import (
@@ -14,51 +17,75 @@ from PySide6.QtWidgets import (
 from app.core.orchestrator import Orchestrator, RunConfig
 
 
-class _PipelineWorker(QThread):
-    """백그라운드에서 Stage 1~3 + 5~7 실행."""
-
-    progress = Signal(str)
-    stage_done = Signal(int, object)   # stage_num, result
-    finished = Signal(Path)
+class _PreGateWorker(QThread):
+    """Stage 0~3 백그라운드 실행."""
+    stage_done = Signal(int)
+    finished = Signal(list)   # verified tcs
     error = Signal(str)
 
-    def __init__(
-        self,
-        orch: Orchestrator,
-        skip_stage0: bool,
-        gate_decisions: dict,
-    ):
+    def __init__(self, orch: Orchestrator, has_files: bool):
         super().__init__()
         self._orch = orch
-        self._skip_stage0 = skip_stage0
-        self._gate = gate_decisions
+        self._has_files = has_files
 
     def run(self) -> None:
         try:
-            out = self._orch.run_pipeline(
-                skip_stage0=self._skip_stage0,
-                gate_decisions=self._gate,
-            )
+            if not self._has_files:
+                self._orch.run_stage0()
+                self.stage_done.emit(1)
+            self._orch.run_stage1()
+            self.stage_done.emit(2)
+            self._orch.run_stage2()
+            self.stage_done.emit(3)
+            tcs = self._orch.run_stage3()
+            self.stage_done.emit(4)
+            self.finished.emit(tcs)
+        except Exception:
+            self.error.emit(traceback.format_exc())
+
+
+class _PostGateWorker(QThread):
+    """Stage 5~7 백그라운드 실행."""
+    stage_done = Signal(int)
+    finished = Signal(object)  # Path
+    error = Signal(str)
+
+    def __init__(self, orch: Orchestrator):
+        super().__init__()
+        self._orch = orch
+
+    def run(self) -> None:
+        try:
+            self._orch.run_stage5()
+            self.stage_done.emit(5)
+            self._orch.run_stage6()
+            self.stage_done.emit(6)
+            out = self._orch.run_stage7()
+            self.stage_done.emit(7)
             self.finished.emit(out)
-        except Exception as e:
-            self.error.emit(str(e))
+        except Exception:
+            self.error.emit(traceback.format_exc())
 
 
 class PipelineView(QMainWindow):
     """파이프라인 실행 창. gate_decisions 주입으로 Stage 4 반영."""
 
-    gate_review_requested = Signal(list)   # tcs → reviewer_gate 열기
+    gate_review_requested = Signal(list)
+    _log_signal = Signal(str)   # 워커 스레드에서 UI로 안전하게 로그 전달
 
     def __init__(self, config: RunConfig, parent=None):
         super().__init__(parent)
         self.setWindowTitle(f"AWT 실행 — {config.run_id}")
         self.resize(1000, 660)
         self._config = config
-        self._orch = Orchestrator(config, progress_cb=self._on_progress)
-        self._worker: _PipelineWorker | None = None
+        self._orch = Orchestrator(config, progress_cb=self._log_signal.emit)
+        self._pre_worker: _PreGateWorker | None = None
+        self._post_worker: _PostGateWorker | None = None
         self._tcs: list[dict] = []
-        self._gate_decisions: dict = {}
         self._build_ui()
+        # 시그널 → UI 연결 (워커 스레드에서 emit해도 안전)
+        self._log_signal.connect(self._append_log)
+        self._write_meta("started")
 
     # ── UI ────────────────────────────────────────────────────────────────
     def _build_ui(self) -> None:
@@ -69,17 +96,17 @@ class PipelineView(QMainWindow):
 
         # 상단 정보
         info_row = QHBoxLayout()
-        self._url_lbl = QLabel(f"대상: {self._config.target_url}")
-        self._url_lbl.setStyleSheet("font-weight:bold;")
-        info_row.addWidget(self._url_lbl)
+        url_lbl = QLabel(f"대상: {self._config.target_url}")
+        url_lbl.setStyleSheet("font-weight:bold;")
+        info_row.addWidget(url_lbl)
         info_row.addStretch()
-        self._run_btn = QPushButton("▶ Stage 1~3 실행")
+        self._run_btn = QPushButton("Stage 1~3 실행")
         self._run_btn.setStyleSheet(
             "QPushButton{background:#16a34a;color:white;border-radius:4px;padding:4px 14px;}"
             "QPushButton:hover{background:#15803d;}"
             "QPushButton:disabled{background:#86efac;}"
         )
-        self._run_btn.clicked.connect(self._start_pipeline)
+        self._run_btn.clicked.connect(self._start_pre_gate)
         info_row.addWidget(self._run_btn)
         root.addLayout(info_row)
 
@@ -87,7 +114,6 @@ class PipelineView(QMainWindow):
         self._progress_bar = QProgressBar()
         self._progress_bar.setRange(0, 7)
         self._progress_bar.setValue(0)
-        self._progress_bar.setTextVisible(True)
         self._progress_bar.setFormat("Stage %v / 7")
         root.addWidget(self._progress_bar)
 
@@ -126,14 +152,14 @@ class PipelineView(QMainWindow):
         self._gate_btn.clicked.connect(self._open_gate)
         tc_lay.addWidget(self._gate_btn)
 
-        self._exec_btn = QPushButton("▶ Stage 5~7 실행")
+        self._exec_btn = QPushButton("Stage 5~7 실행")
         self._exec_btn.setEnabled(False)
         self._exec_btn.setStyleSheet(
             "QPushButton{background:#2563eb;color:white;border-radius:4px;padding:4px 14px;}"
             "QPushButton:hover{background:#1d4ed8;}"
             "QPushButton:disabled{background:#93c5fd;}"
         )
-        self._exec_btn.clicked.connect(self._start_exec)
+        self._exec_btn.clicked.connect(self._start_post_gate)
         tc_lay.addWidget(self._exec_btn)
         splitter.addWidget(tc_widget)
 
@@ -142,58 +168,79 @@ class PipelineView(QMainWindow):
 
         self.setStatusBar(QStatusBar())
 
-    # ── 파이프라인 제어 ───────────────────────────────────────────────────
-    def _start_pipeline(self) -> None:
+    # ── Stage 1~3 (Pre-Gate) ─────────────────────────────────────────────
+    def _start_pre_gate(self) -> None:
         self._run_btn.setEnabled(False)
         self._log.clear()
         self._progress_bar.setValue(0)
+        self._append_log(f"[{datetime.now():%H:%M:%S}] Stage 1~3 시작...")
 
-        try:
-            if not self._config.input_files:
-                self._orch.run_stage0()
-                self._progress_bar.setValue(1)
-            self._orch.run_stage1()
-            self._progress_bar.setValue(2)
-            self._orch.run_stage2()
-            self._progress_bar.setValue(3)
-            self._tcs = self._orch.run_stage3()
-            self._progress_bar.setValue(4)
-            self._refresh_tc_table()
-            self._gate_btn.setEnabled(True)
-            self._on_progress("▶ Stage 3 완료. Reviewer Gate를 진행하세요.")
-        except Exception as e:
-            QMessageBox.critical(self, "오류", str(e))
-            self._run_btn.setEnabled(True)
+        self._pre_worker = _PreGateWorker(
+            orch=self._orch,
+            has_files=bool(self._config.input_files),
+        )
+        self._pre_worker.stage_done.connect(self._progress_bar.setValue)
+        self._pre_worker.finished.connect(self._on_pre_gate_done)
+        self._pre_worker.error.connect(self._on_error)
+        self._pre_worker.start()
 
+    def _on_pre_gate_done(self, tcs: list) -> None:
+        self._tcs = tcs
+        self._refresh_tc_table()
+        self._gate_btn.setEnabled(True)
+        self._write_meta("stage3_done")
+        self._append_log(f"[{datetime.now():%H:%M:%S}] Stage 3 완료 — TC {len(tcs)}개. Reviewer Gate를 진행하세요.")
+        self.statusBar().showMessage(f"Stage 3 완료 — TC {len(tcs)}개")
+
+    # ── Stage 4 Gate ─────────────────────────────────────────────────────
     def _open_gate(self) -> None:
         self.gate_review_requested.emit(self._tcs)
 
     def apply_gate(self, decisions: dict) -> None:
-        """ReviewerGate에서 결정이 완료되면 호출됨."""
-        self._gate_decisions = decisions
+        """ReviewerGate 결정 완료 시 호출됨."""
         self._tcs = self._orch.apply_gate_decisions(decisions)
         self._refresh_tc_table()
         self._exec_btn.setEnabled(True)
         self._gate_btn.setEnabled(False)
-        self._on_progress("▶ Gate 결정 반영 완료. Stage 5~7을 실행하세요.")
+        self._write_meta("stage4_done")
+        self._append_log(f"[{datetime.now():%H:%M:%S}] Gate 결정 반영 완료. Stage 5~7을 실행하세요.")
 
-    def _start_exec(self) -> None:
+    # ── Stage 5~7 (Post-Gate) ─────────────────────────────────────────────
+    def _start_post_gate(self) -> None:
         self._exec_btn.setEnabled(False)
-        try:
-            self._tcs = self._orch.run_stage5()
-            self._progress_bar.setValue(5)
-            self._tcs = self._orch.run_stage6()
-            self._progress_bar.setValue(6)
-            out = self._orch.run_stage7()
-            self._progress_bar.setValue(7)
-            self._refresh_tc_table()
-            self._on_progress(f"✅ 완료 → {out}")
-            QMessageBox.information(self, "완료", f"tc_final.xlsx 생성:\n{out}")
-        except Exception as e:
-            QMessageBox.critical(self, "오류", str(e))
+        self._append_log(f"[{datetime.now():%H:%M:%S}] Stage 5~7 시작...")
+
+        self._post_worker = _PostGateWorker(orch=self._orch)
+        self._post_worker.stage_done.connect(self._progress_bar.setValue)
+        self._post_worker.finished.connect(self._on_post_gate_done)
+        self._post_worker.error.connect(self._on_error)
+        self._post_worker.start()
+
+    def _on_post_gate_done(self, out: Path) -> None:
+        self._tcs = self._orch.tcs
+        self._refresh_tc_table()
+        self._write_meta("done")
+        self._append_log(f"[{datetime.now():%H:%M:%S}] 완료 -> {out}")
+        self.statusBar().showMessage(f"완료: {out.name}")
+
+        passed = sum(1 for tc in self._tcs if tc.get("result") == "pass")
+        failed = sum(1 for tc in self._tcs if tc.get("result") == "fail")
+        total = len(self._tcs)
+        QMessageBox.information(
+            self, "실행 완료",
+            f"tc_final.xlsx 생성 완료\n\n"
+            f"총 {total}개  PASS {passed}  FAIL {failed}\n\n{out}"
+        )
+
+    # ── 오류 처리 ────────────────────────────────────────────────────────
+    def _on_error(self, msg: str) -> None:
+        self._run_btn.setEnabled(True)
+        self._append_log(f"[오류]\n{msg}")
+        self.statusBar().showMessage("오류 발생")
+        QMessageBox.critical(self, "오류", msg[:800])
 
     # ── UI 갱신 ──────────────────────────────────────────────────────────
-    def _on_progress(self, msg: str) -> None:
+    def _append_log(self, msg: str) -> None:
         self._log.appendPlainText(msg)
         self.statusBar().showMessage(msg[:80])
 
@@ -231,3 +278,18 @@ class PipelineView(QMainWindow):
             res_item = items[4]
             res_item.setBackground(result_colors.get(tc.get("result", ""), QColor("white")))
             self._tc_table.setItem(r, 4, res_item)
+
+    # ── 메타 저장 (대시보드 이력용) ───────────────────────────────────────
+    def _write_meta(self, stage: str) -> None:
+        try:
+            meta = {
+                "run_id": self._config.run_id,
+                "target_url": self._config.target_url,
+                "stage": stage,
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            }
+            (self._orch.run_dir / "meta.json").write_text(
+                json.dumps(meta, ensure_ascii=False), encoding="utf-8"
+            )
+        except Exception:
+            pass

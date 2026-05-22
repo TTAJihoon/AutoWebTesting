@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from app.auth.db_client import DBClient
 from app.config.db_config import DBConfig
-from app.config.settings import load_api_key
+from app.config.settings import load_api_key, get_active_provider
 from app.ui.login_window import LoginWindow
 from app.ui.dashboard import Dashboard
 from app.ui.wizard import RunWizard
@@ -50,7 +50,17 @@ def main() -> None:
     _pipeline_views: list[PipelineView] = []
 
     def _open_wizard() -> None:
-        wiz = RunWizard(api_key=api_key, parent=dash)
+        # 설정 탭에서 키를 저장한 경우를 위해 항상 최신값 로드
+        current_key = load_api_key() or api_key
+        if not current_key or current_key.startswith("AIza여기에") or current_key.startswith("sk-ant-여기에") or current_key.startswith("sk-여기에"):
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                dash, "API Key 미설정",
+                "LLM API Key가 설정되지 않았습니다.\n"
+                "대시보드 → 설정 탭에서 API Key를 먼저 저장해주세요."
+            )
+            return
+        wiz = RunWizard(api_key=current_key, parent=dash)
         wiz.run_config_ready.connect(_start_pipeline)
         wiz.exec()
 
