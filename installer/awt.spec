@@ -64,3 +64,16 @@ coll = COLLECT(
     upx_exclude=[],
     name="AWT",
 )
+
+# 빌드 후 .env.example을 dist/AWT/에 복사 (실제 .env는 사용자가 직접 편집)
+import shutil
+_env_example = ROOT / ".env.example"
+_env_dest    = ROOT / "dist" / "AWT" / ".env.example"
+if _env_example.exists():
+    shutil.copy2(str(_env_example), str(_env_dest))
+
+# 로컬 .env가 있으면 함께 복사 (개발/테스트 편의)
+_env_src  = ROOT / ".env"
+_env_ddst = ROOT / "dist" / "AWT" / ".env"
+if _env_src.exists():
+    shutil.copy2(str(_env_src), str(_env_ddst))
