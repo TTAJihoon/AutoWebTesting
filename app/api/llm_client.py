@@ -33,6 +33,8 @@ class LLMClient:
         "gemini-2.0-flash":       6.0,
         "gemini-2.0-flash-lite":  6.0,
         "gemini-1.5-flash":       5.0,
+        "gemma-4-26b-a4b-it":    6.0,   # Gemma 4 26B
+        "gemma-4-31b-it":        6.0,   # Gemma 4 31B
     }
 
     def __init__(
