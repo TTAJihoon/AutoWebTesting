@@ -1,6 +1,13 @@
 """PostgreSQL 접속 설정 (D44)."""
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent.parent.parent / ".env")
+except ImportError:
+    pass
 
 
 @dataclass

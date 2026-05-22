@@ -22,7 +22,7 @@ def _client() -> DBClient:
 def cmd_init() -> None:
     db = _client()
     db.ensure_schema()
-    print("✅ 스키마 초기화 완료.")
+    print("[OK] 스키마 초기화 완료.")
     db.close()
 
 
@@ -32,15 +32,15 @@ def cmd_create_user() -> None:
     password = getpass.getpass("비밀번호: ")
     confirm = getpass.getpass("비밀번호 확인: ")
     if password != confirm:
-        print("❌ 비밀번호가 일치하지 않습니다.")
+        print("[ERROR] 비밀번호가 일치하지 않습니다.")
         db.close()
         return
     role = input("역할 (reviewer/admin) [reviewer]: ").strip() or "reviewer"
     try:
         uid = db.create_user(username, password, role)
-        print(f"✅ 사용자 생성: {username} (id={uid}, role={role})")
+        print(f"[OK] 사용자 생성: {username} (id={uid}, role={role})")
     except ValueError as e:
-        print(f"❌ {e}")
+        print(f"[ERROR] {e}")
     db.close()
 
 
