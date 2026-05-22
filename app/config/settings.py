@@ -18,8 +18,13 @@ from pathlib import Path
 from cryptography.fernet import Fernet
 
 try:
+    import sys
     from dotenv import load_dotenv
-    load_dotenv(Path(__file__).parent.parent.parent / ".env")
+    if getattr(sys, "frozen", False):
+        _env_path = Path(sys.executable).parent / ".env"
+    else:
+        _env_path = Path(__file__).parent.parent.parent / ".env"
+    load_dotenv(_env_path)
 except ImportError:
     pass
 

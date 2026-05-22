@@ -4,8 +4,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 try:
+    import sys
     from dotenv import load_dotenv
-    load_dotenv(Path(__file__).parent.parent.parent / ".env")
+    # PyInstaller exe: AWT.exe 옆의 .env / 개발: 프로젝트 루트 .env
+    if getattr(sys, "frozen", False):
+        _env_path = Path(sys.executable).parent / ".env"
+    else:
+        _env_path = Path(__file__).parent.parent.parent / ".env"
+    load_dotenv(_env_path)
 except ImportError:
     pass
 
