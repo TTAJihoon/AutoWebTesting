@@ -7,10 +7,31 @@ from PySide6.QtWidgets import (
     QPushButton, QFileDialog, QListWidget, QListWidgetItem,
     QDoubleSpinBox, QTableWidget, QTableWidgetItem,
     QHeaderView, QStackedWidget, QWidget, QCheckBox,
-    QMessageBox, QGroupBox,
+    QMessageBox, QGroupBox, QComboBox,
 )
 
+from app.config.settings import get_active_provider
 from app.core.orchestrator import RunConfig
+
+_MODELS: dict[str, list[tuple[str, str]]] = {
+    "google": [
+        ("gemini-2.5-flash",      "Gemini 2.5 Flash  (추천 · 빠름)"),
+        ("gemini-2.5-pro",        "Gemini 2.5 Pro  (고성능)"),
+        ("gemini-2.0-flash",      "Gemini 2.0 Flash"),
+        ("gemini-1.5-flash",      "Gemini 1.5 Flash"),
+        ("gemini-1.5-pro",        "Gemini 1.5 Pro"),
+    ],
+    "anthropic": [
+        ("claude-sonnet-4-6",          "Claude Sonnet 4.6  (추천)"),
+        ("claude-opus-4-7",            "Claude Opus 4.7  (고성능)"),
+        ("claude-haiku-4-5-20251001",  "Claude Haiku 4.5  (빠름)"),
+    ],
+    "openai": [
+        ("gpt-4o",      "GPT-4o  (추천)"),
+        ("gpt-4o-mini", "GPT-4o Mini  (빠름)"),
+        ("o3-mini",     "o3-mini  (추론)"),
+    ],
+}
 
 
 class RunWizard(QDialog):
@@ -131,6 +152,23 @@ class RunWizard(QDialog):
 
         lay.addWidget(QLabel("<b>Step 3: 실행 옵션</b>"))
 
+        # ── 모델 선택 ────────────────────────────────────────────────────
+        model_box = QGroupBox("LLM 모델")
+        m_lay = QVBoxLayout(model_box)
+        self._model_combo = QComboBox()
+        provider = get_active_provider()
+        models = _MODELS.get(provider, [])
+        for model_id, label in models:
+            self._model_combo.addItem(label, userData=model_id)
+        if not models:
+            self._model_combo.addItem("(provider 미설정)", userData=None)
+        m_lay.addWidget(self._model_combo)
+        provider_hint = QLabel(f"현재 provider: {provider}")
+        provider_hint.setStyleSheet("color:#888; font-size:11px;")
+        m_lay.addWidget(provider_hint)
+        lay.addWidget(model_box)
+
+        # ── INFERRED 임계값 ──────────────────────────────────────────────
         thresh_box = QGroupBox("INFERRED 비율 임계값")
         t_lay = QVBoxLayout(thresh_box)
         self._thresh_spin = QDoubleSpinBox()
@@ -202,6 +240,7 @@ class RunWizard(QDialog):
                 self._auth_rows.append(entry)
 
     def _finish(self) -> None:
+        model_override = self._model_combo.currentData()
         config = RunConfig(
             api_key=self._api_key,
             target_url=self._url_edit.text().strip(),
@@ -211,6 +250,7 @@ class RunWizard(QDialog):
             ],
             auth_sequence=self._auth_rows,
             inferred_threshold=self._thresh_spin.value(),
+            model_override=model_override,
         )
         self.run_config_ready.emit(config)
         self.accept()
