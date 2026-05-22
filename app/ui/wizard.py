@@ -23,6 +23,8 @@ _MODELS: dict[str, list[tuple[str, str]]] = {
         ("gemini-3.1-flash-lite",  "[유료] Gemini 3.1 Flash Lite  — $0.25/$1.50/M"),
         ("gemini-3.5-flash",       "[유료] Gemini 3.5 Flash  — $1.50/$9.00/M"),
         ("gemini-3.1-pro-preview", "[유료] Gemini 3.1 Pro Preview  — $2.00/$12.00/M"),
+        # ── 테스트 / 오픈소스 ────────────────────────────────────────────
+        ("gemma-4-27b-it",         "[테스트] Gemma 4 26B  (gemma-4-27b-it)"),
     ],
     "anthropic": [
         # ── 유료 전용 (무료 API 티어 없음) ─────────────────────────────
