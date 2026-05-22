@@ -1,4 +1,9 @@
-"""Stage 5 — Playwright TC 자동 실행 (D39)."""
+"""Stage 5 — Playwright TC 자동 실행 (D40 고도화).
+
+변경 이력:
+  D39 — 기본 구현: page.inner_text("body") 키워드 매칭
+  D40 — 고도화: GnuboardTestEngine 통합 (URL 라우팅 + 픽스처 + 액션 엔진)
+"""
 from __future__ import annotations
 import time
 from typing import Callable
@@ -19,7 +24,11 @@ def execute(
             progress_cb(msg)
 
     runnable = [tc for tc in tcs if tc.get("review_status") in ("approved", "edited")]
-    _cb(f"Stage 5: {len(runnable)}개 TC 자동 실행 시작")
+    _cb(f"Stage 5: {len(runnable)}개 TC 자동 실행 시작 (D40 고도화 엔진)")
+
+    # gnuboard5 전용 엔진 사용 여부 판단
+    # auth_sequence에서 admin_id/admin_pw 추출 시도
+    admin_id, admin_pw = _extract_admin_creds(auth_sequence)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -27,15 +36,45 @@ def execute(
         page = context.new_page()
 
         page.goto(base_url, wait_until="networkidle", timeout=30000)
+
+        # 초기 로그인 (auth_sequence)
         if auth_sequence:
             _run_auth(page, auth_sequence)
 
-        for i, tc in enumerate(runnable, 1):
-            _cb(f"  실행 중 ({i}/{len(runnable)}): {tc['tc_id']}")
-            _run_tc(page, tc, base_url)
+        # gnuboard 엔진 감지 — tcs에 소분류 필드가 있으면 고도화 엔진 사용
+        use_gnuboard = any(tc.get("소분류") for tc in runnable[:3])
+
+        if use_gnuboard:
+            from app.core.stage5_gnuboard import (
+                GnuboardFixtures, setup_fixtures, execute_tc as gb_execute_tc,
+            )
+            fixtures = GnuboardFixtures(admin_id=admin_id, admin_pw=admin_pw)
+            # 초기 상태: auth_sequence로 이미 로그인됨
+            if admin_id:
+                fixtures.logged_in_as = "admin"
+
+            _cb("  [D40] GnuBoard5 엔진 초기화 — 픽스처 설정 시작")
+            try:
+                setup_fixtures(page, base_url, fixtures,
+                               admin_id=admin_id, admin_pw=admin_pw, cb=_cb)
+            except Exception as e:
+                _cb(f"  [D40] 픽스처 설정 실패 (무시): {e}")
+
+            _cb(f"  [D40] TC 실행 시작")
+            for i, tc in enumerate(runnable, 1):
+                _cb(f"  실행 ({i}/{len(runnable)}): {tc['tc_id']} [{tc.get('소분류','')}]")
+                gb_execute_tc(page, tc, base_url, fixtures, cb=_cb)
+
+        else:
+            # fallback: 기존 shallow 실행
+            _cb("  [D39] 기본 엔진으로 실행 (소분류 필드 없음)")
+            for i, tc in enumerate(runnable, 1):
+                _cb(f"  실행 중 ({i}/{len(runnable)}): {tc['tc_id']}")
+                _run_tc(page, tc, base_url)
 
         browser.close()
 
+    # 실행 제외 TC → not_executed
     not_run = [tc for tc in tcs if tc.get("review_status") not in ("approved", "edited")]
     for tc in not_run:
         tc["result"] = "not_executed"
@@ -44,8 +83,24 @@ def execute(
     tcs, v6_report = v6_annotate(tcs, overwrite_exec_confidence=True)
     _cb(v6_format(v6_report))
 
-    _cb(f"Stage 5 완료")
+    _cb("Stage 5 완료")
     return tcs
+
+
+def _extract_admin_creds(auth_sequence: list[dict] | None) -> tuple[str, str]:
+    """auth_sequence에서 admin_id, admin_pw 추출."""
+    if not auth_sequence:
+        return "admin", "Gnuboard5!"
+    admin_id, admin_pw = "admin", "Gnuboard5!"
+    for step in auth_sequence:
+        if step.get("action") == "fill":
+            sel = step.get("selector", "")
+            val = step.get("value", "")
+            if "id" in sel:
+                admin_id = val
+            elif "pw" in sel or "password" in sel:
+                admin_pw = val
+    return admin_id, admin_pw
 
 
 def _run_auth(page: Page, auth_sequence: list[dict]) -> None:
@@ -60,21 +115,18 @@ def _run_auth(page: Page, auth_sequence: list[dict]) -> None:
             page.wait_for_load_state("networkidle", timeout=10000)
 
 
+# ─── D39 fallback 구현 (소분류 없는 TC용) ──────────────────────────────────
+
 def _run_tc(page: Page, tc: dict, base_url: str) -> None:
     start = time.time()
     try:
-        # precondition에서 액션 파싱 (자연어 → 간단한 패턴 매칭)
         _apply_precondition(page, tc.get("precondition", ""), base_url)
-
-        # 기대 출력 검증
         expected = tc.get("expected", "")
-        # inner_text(): JS 렌더링 후 가시 텍스트만 추출 (head CSS/JS 제외)
-        # 전체 body 텍스트를 사용해 한국어 키워드 매칭 정확도 향상
         try:
             actual_text = page.inner_text("body") or ""
         except Exception:
             actual_text = page.content()
-        actual_snippet = actual_text[:500]  # 로그용 일부
+        actual_snippet = actual_text[:500]
 
         if expected and any(kw in actual_text for kw in _key_phrases(expected)):
             tc["result"] = "pass"
@@ -93,10 +145,8 @@ def _run_tc(page: Page, tc: dict, base_url: str) -> None:
 
 
 def _apply_precondition(page: Page, precondition: str, base_url: str) -> None:
-    """precondition 자연어에서 기본 액션 추출 (간단한 휴리스틱)."""
     lower = precondition.lower()
     if "로그인" in lower and "비로그인" not in lower:
-        # 이미 로그인 상태인지 확인
         if "로그아웃" not in page.content():
             page.goto(base_url, wait_until="networkidle", timeout=15000)
     elif "비로그인" in lower:
@@ -106,7 +156,7 @@ def _apply_precondition(page: Page, precondition: str, base_url: str) -> None:
 
 
 def _key_phrases(expected: str) -> list[str]:
-    """기대 출력에서 검증 키워드 추출."""
+    """기대 출력에서 검증 키워드 추출 (D39 fallback용)."""
     import re
     quoted = re.findall(r"[`'\"](.+?)[`'\"]", expected)
     if quoted:
