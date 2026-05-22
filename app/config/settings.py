@@ -17,6 +17,12 @@ import platform
 from pathlib import Path
 from cryptography.fernet import Fernet
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent.parent.parent / ".env")
+except ImportError:
+    pass
+
 _CONFIG_DIR = Path.home() / ".awt"
 _CONFIG_FILE = _CONFIG_DIR / "settings.enc"
 
