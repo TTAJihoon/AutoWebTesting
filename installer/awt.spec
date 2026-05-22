@@ -4,7 +4,7 @@
 import sys
 from pathlib import Path
 
-ROOT = Path(SPECPATH)
+ROOT = Path(SPECPATH).parent
 
 a = Analysis(
     [str(ROOT / "app" / "main.py")],
