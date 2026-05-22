@@ -15,21 +15,26 @@ from app.core.orchestrator import RunConfig
 
 _MODELS: dict[str, list[tuple[str, str]]] = {
     "google": [
-        ("gemini-2.5-flash",      "Gemini 2.5 Flash  (추천 · 빠름)"),
-        ("gemini-2.5-pro",        "Gemini 2.5 Pro  (고성능)"),
-        ("gemini-2.0-flash",      "Gemini 2.0 Flash"),
-        ("gemini-1.5-flash",      "Gemini 1.5 Flash"),
-        ("gemini-1.5-pro",        "Gemini 1.5 Pro"),
+        # ── 무료 티어 있음 ──────────────────────────────────────────────
+        ("gemini-2.5-flash",      "[무료] Gemini 2.5 Flash  — $0.30/$2.50/M  (추천)"),
+        ("gemini-2.5-flash-lite", "[무료] Gemini 2.5 Flash Lite  — $0.10/$0.40/M  (저비용)"),
+        ("gemini-2.5-pro",        "[무료] Gemini 2.5 Pro  — $1.25/$10.00/M  (고성능)"),
+        # ── 유료 전용 ───────────────────────────────────────────────────
+        ("gemini-3.1-flash-lite",  "[유료] Gemini 3.1 Flash Lite  — $0.25/$1.50/M"),
+        ("gemini-3.5-flash",       "[유료] Gemini 3.5 Flash  — $1.50/$9.00/M"),
+        ("gemini-3.1-pro-preview", "[유료] Gemini 3.1 Pro Preview  — $2.00/$12.00/M"),
     ],
     "anthropic": [
-        ("claude-sonnet-4-6",          "Claude Sonnet 4.6  (추천)"),
-        ("claude-opus-4-7",            "Claude Opus 4.7  (고성능)"),
-        ("claude-haiku-4-5-20251001",  "Claude Haiku 4.5  (빠름)"),
+        # ── 유료 전용 (무료 API 티어 없음) ─────────────────────────────
+        ("claude-haiku-4-5",   "[유료] Claude Haiku 4.5  — $1/$5/M  (저비용)"),
+        ("claude-sonnet-4-6",  "[유료] Claude Sonnet 4.6  — $3/$15/M  (추천)"),
+        ("claude-opus-4-7",    "[유료] Claude Opus 4.7  — $5/$25/M  (고성능)"),
     ],
     "openai": [
-        ("gpt-4o",      "GPT-4o  (추천)"),
-        ("gpt-4o-mini", "GPT-4o Mini  (빠름)"),
-        ("o3-mini",     "o3-mini  (추론)"),
+        # ── 유료 전용 (무료 API 티어 없음) ─────────────────────────────
+        ("gpt-4.1-nano", "[유료] GPT-4.1 Nano  — $0.10/$0.40/M  (저비용)"),
+        ("gpt-4o-mini",  "[유료] GPT-4o Mini  — $0.15/$0.60/M  (균형)"),
+        ("gpt-4o",       "[유료] GPT-4o  — $2.50/$10.00/M  (고성능)"),
     ],
 }
 
