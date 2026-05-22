@@ -33,8 +33,8 @@ class LLMClient:
         "gemini-2.0-flash":       6.0,
         "gemini-2.0-flash-lite":  6.0,
         "gemini-1.5-flash":       5.0,
-        "gemma-4-26b-a4b-it":    6.0,   # Gemma 4 26B
-        "gemma-4-31b-it":        6.0,   # Gemma 4 31B
+        "gemma-4-26b-a4b-it":   12.0,   # Gemma 4 26B (preview — 500 오류 방지용 보수적 간격)
+        "gemma-4-31b-it":       12.0,   # Gemma 4 31B
     }
 
     def __init__(
@@ -43,6 +43,7 @@ class LLMClient:
         run_id: str,
         provider_override: str | None = None,
         model_override: str | None = None,
+        progress_cb: Any = None,
     ):
         """
         Args:
@@ -52,11 +53,13 @@ class LLMClient:
             model_override: Contract frontmatter의 model을 이 값으로 교체.
                 예) "gemini-3.5-flash" 설정 시 모든 Contract가 Gemini로 실행됨.
                 None이면 각 Contract의 model을 그대로 사용.
+            progress_cb: 재시도 메시지를 GUI 로그로 전달하기 위한 콜백 (선택)
         """
         self._api_key = api_key
         self._run_id = run_id
         self._provider_override = provider_override
         self._model_override = model_override
+        self._progress_cb = progress_cb
         self._log_dir = _LOG_DIR / run_id / "llm"
         self._log_dir.mkdir(parents=True, exist_ok=True)
         # provider 인스턴스 캐시 — 같은 provider는 1회만 생성
@@ -116,13 +119,21 @@ class LLMClient:
                 json_mode=True,
             )
         except Exception as e:
-            # 503/429 일시 오류 — 최대 3회 지수 백오프 재시도
+            # 일시적 서버/속도 오류 — 최대 5회 지수 백오프 재시도
+            # 500 INTERNAL: Gemini 서버 과부하 (일시적)
+            # 503 UNAVAILABLE / 429 RESOURCE_EXHAUSTED: 속도 제한
             err_str = str(e)
-            if _retry_count < 3 and any(
-                code in err_str for code in ("503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED")
+            if _retry_count < 5 and any(
+                code in err_str for code in (
+                    "500", "503", "429",
+                    "INTERNAL", "UNAVAILABLE", "RESOURCE_EXHAUSTED",
+                )
             ):
-                wait_sec = 10 * (2 ** _retry_count)  # 10 → 20 → 40초
-                self._log_retry(contract_id, _retry_count + 1, wait_sec, err_str)
+                wait_sec = 15 * (2 ** _retry_count)  # 15 → 30 → 60 → 120 → 240초
+                try:
+                    self._log_retry(contract_id, _retry_count + 1, wait_sec, err_str)
+                except Exception:
+                    pass  # 로그 실패가 재시도를 막지 않도록
                 time.sleep(wait_sec)
                 return self.call(contract_id, inputs, use_cache, _retry_count + 1)
             raise
@@ -150,11 +161,27 @@ class LLMClient:
 
     def _log_retry(self, contract_id: str, attempt: int, wait_sec: int, err: str) -> None:
         import sys
-        print(
-            f"  [LLMClient] {contract_id} 일시 오류 — {wait_sec}초 후 재시도 "
-            f"({attempt}/3): {err[:80]}",
-            file=sys.stderr,
+        # 오류 메시지에서 핵심 상태 코드만 추출 (긴 traceback 제거)
+        err_summary = err.splitlines()[0][:100] if err else ""
+        msg = (
+            f"  [재시도 {attempt}/5] {contract_id} - {wait_sec}초 대기 중... "
+            f"({err_summary})"
         )
+        # GUI progress_cb 우선 사용 (없으면 stderr fallback)
+        if self._progress_cb:
+            try:
+                self._progress_cb(msg)
+            except Exception:
+                pass
+        else:
+            try:
+                print(msg, file=sys.stderr)
+            except (UnicodeEncodeError, OSError):
+                safe = msg.encode("ascii", errors="replace").decode("ascii")
+                try:
+                    print(safe, file=sys.stderr)
+                except Exception:
+                    pass
 
     def _parse_json(self, text: str) -> dict:
         text = text.strip()

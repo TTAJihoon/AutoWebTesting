@@ -53,7 +53,7 @@ def ingest(
         # 파일에서 기능 목록 추출 (마크다운 헤더 기반 휴리스틱)
         leaves = _extract_leaves_from_text(manual_text)
 
-    _cb(f"Stage 1 완료 — leaf {len(leaves)}개")
+    _cb(f"Stage 1 완료 - leaf {len(leaves)}개")
     return {"manual_text": manual_text, "leaves": leaves}
 
 

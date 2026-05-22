@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QTableWidget, QTableWidgetItem,
     QTabWidget, QLineEdit, QComboBox, QMessageBox,
-    QHeaderView, QFrame, QStatusBar,
+    QHeaderView, QFrame, QStatusBar, QMenu, QApplication,
 )
 
 from app.auth.db_client import DBClient
@@ -37,6 +37,8 @@ class Dashboard(QMainWindow):
 
     new_run_requested = Signal()       # → wizard 열기
     open_run_requested = Signal(str)   # run_id → pipeline_view 열기
+    clone_run_requested = Signal(str)  # url → wizard(prefill) 열기
+    logout_requested = Signal()        # → 로그아웃
 
     def __init__(
         self,
@@ -67,20 +69,34 @@ class Dashboard(QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # 상단 헤더
+        # 상단 헤더 — global-nav (surface-black #000000, h=44px)
         header = QFrame()
-        header.setFixedHeight(56)
-        header.setStyleSheet("background:#1e3a5f;")
+        header.setFixedHeight(44)
+        header.setStyleSheet("background:#000000; border:none;")
         h_lay = QHBoxLayout(header)
         h_lay.setContentsMargins(20, 0, 20, 0)
+        h_lay.setSpacing(0)
         lbl = QLabel("AWT")
-        lbl.setFont(QFont("Segoe UI", 16, QFont.Bold))
-        lbl.setStyleSheet("color:white;")
+        lbl.setFont(QFont("Segoe UI", 14, QFont.Bold))
+        lbl.setStyleSheet("color:#ffffff; background:transparent; letter-spacing:1px;")
         h_lay.addWidget(lbl)
         h_lay.addStretch()
-        user_lbl = QLabel(f"{self._username}  [{self._role}]")
-        user_lbl.setStyleSheet("color:#93c5fd;")
+        user_lbl = QLabel(f"{self._username}  ·  {self._role}")
+        user_lbl.setStyleSheet(
+            "color:#7a7a7a; font-size:12px; background:transparent;"
+        )
         h_lay.addWidget(user_lbl)
+        h_lay.addSpacing(16)
+        logout_btn = QPushButton("로그아웃")
+        logout_btn.setStyleSheet(
+            "QPushButton{background:transparent;color:#7a7a7a;"
+            "border:none;border-radius:0;padding:0 4px;"
+            "font-size:12px;min-height:0;}"
+            "QPushButton:hover{color:#ffffff;}"
+        )
+        logout_btn.setCursor(Qt.PointingHandCursor)
+        logout_btn.clicked.connect(self.logout_requested)
+        h_lay.addWidget(logout_btn)
         root.addWidget(header)
 
         # 탭
@@ -103,12 +119,8 @@ class Dashboard(QMainWindow):
         lay.setContentsMargins(16, 12, 16, 12)
 
         top = QHBoxLayout()
-        self._new_btn = QPushButton("＋ 새 실행")
+        self._new_btn = QPushButton("＋  새 실행")
         self._new_btn.setFixedHeight(34)
-        self._new_btn.setStyleSheet(
-            "QPushButton{background:#2563eb;color:white;border-radius:4px;padding:0 16px;}"
-            "QPushButton:hover{background:#1d4ed8;}"
-        )
         self._new_btn.clicked.connect(self.new_run_requested)
         top.addWidget(self._new_btn)
         top.addStretch()
@@ -120,6 +132,8 @@ class Dashboard(QMainWindow):
         self._runs_table.setSelectionBehavior(QTableWidget.SelectRows)
         self._runs_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self._runs_table.doubleClicked.connect(self._open_run)
+        self._runs_table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self._runs_table.customContextMenuRequested.connect(self._on_runs_context_menu)
         lay.addWidget(self._runs_table)
         return w
 
@@ -250,6 +264,25 @@ class Dashboard(QMainWindow):
             return
         run_id = self._runs_table.item(row, 0).text()
         self.open_run_requested.emit(run_id)
+
+    def _on_runs_context_menu(self, pos) -> None:
+        """우클릭 컨텍스트 메뉴 — 복제."""
+        row = self._runs_table.rowAt(pos.y())
+        if row < 0:
+            return
+        url_item = self._runs_table.item(row, 1)
+        url = url_item.text() if url_item else ""
+        has_url = bool(url) and url != "-"
+
+        menu = QMenu(self)
+        clone_action = menu.addAction("복제")
+        clone_action.setEnabled(has_url)
+
+        action = menu.exec(self._runs_table.viewport().mapToGlobal(pos))
+        if action == clone_action and has_url:
+            QApplication.clipboard().setText(url)
+            self.clone_run_requested.emit(url)
+            self.statusBar().showMessage(f"URL 복사됨: {url}", 3000)
 
     # ── 설정 액션 ────────────────────────────────────────────────────────
     def _save_api_key(self) -> None:

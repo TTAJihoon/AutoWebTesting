@@ -58,14 +58,14 @@ def verify(
         if not structural:
             # 구조적 오류 없음 — V10 gap만 남은 경우 TC 추가 후 완료
             if v10_gaps:
-                _cb(f"  V10 커버리지 부족 {len(v10_gaps)}개 leaf — 누락 카테고리 TC 추가 생성")
+                _cb(f"  V10 커버리지 부족 {len(v10_gaps)}개 leaf - 누락 카테고리 TC 추가 생성")
                 new_tcs = _add_v10_tcs(v10_gaps, leaves, manual_text, tcs, llm_client, _cb)
                 tcs.extend(new_tcs)
-            _cb(f"Stage 3 완료 (시도 {attempt}회) — 모든 검증 통과")
+            _cb(f"Stage 3 완료 (시도 {attempt}회) - 모든 검증 통과")
             return tcs
 
         # V1-V5 구조적 실패 → TC_REGEN
-        _cb(f"  구조적 실패 {len(structural)}건 (시도 {attempt}/{max_retries}) — TC_REGEN 호출")
+        _cb(f"  구조적 실패 {len(structural)}건 (시도 {attempt}/{max_retries}) - TC_REGEN 호출")
         failed_ids  = {f["tc_id"] for f in structural}
 
         # "ALL" 실패(V3/V4/V5)는 tc_id가 "ALL"로 기록됨 → 실제 대상 TC 선별
@@ -133,7 +133,7 @@ def verify(
                 tcs[i] = merged
 
     # 최대 재시도 초과 — 구조적 잔여 실패만 INFERRED 마킹
-    _cb("Stage 3: 최대 재시도 초과 — 구조적 잔여 실패 TC를 INFERRED 마킹")
+    _cb("Stage 3: 최대 재시도 초과 - 구조적 잔여 실패 TC를 INFERRED 마킹")
     remaining    = _check_all(tcs, manual_text, leaves, inferred_threshold)
     str_remain   = [f for f in remaining if f["v"] != "V10"]
     v10_remain   = [f for f in remaining if f["v"] == "V10"]
@@ -150,7 +150,7 @@ def verify(
 
     # V10 gap이 남아 있어도 마지막으로 한 번 TC 추가 시도
     if v10_remain:
-        _cb(f"  V10 gap {len(v10_remain)}개 leaf — 최후 TC 추가 시도")
+        _cb(f"  V10 gap {len(v10_remain)}개 leaf - 최후 TC 추가 시도")
         new_tcs = _add_v10_tcs(v10_remain, leaves, manual_text, tcs, llm_client, _cb)
         tcs.extend(new_tcs)
 

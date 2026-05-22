@@ -119,5 +119,5 @@ def scan(
         )
     (out_dir / "feature-spec-draft.md").write_text("\n".join(md_lines), encoding="utf-8")
 
-    _cb(f"Stage 0 완료 — 기능 {len(all_features)}개 추출")
+    _cb(f"Stage 0 완료 - 기능 {len(all_features)}개 추출")
     return draft

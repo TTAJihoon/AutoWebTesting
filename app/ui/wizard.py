@@ -46,7 +46,7 @@ class RunWizard(QDialog):
 
     run_config_ready = Signal(object)  # RunConfig
 
-    def __init__(self, api_key: str, parent=None):
+    def __init__(self, api_key: str, prefill_url: str = "", parent=None):
         super().__init__(parent)
         self.setWindowTitle("새 실행 — 설정 마법사")
         self.setFixedSize(620, 480)
@@ -54,6 +54,9 @@ class RunWizard(QDialog):
         self._api_key = api_key
         self._auth_rows: list[dict] = []
         self._build_ui()
+        # 복제 시 URL 자동 입력
+        if prefill_url:
+            self._url_edit.setText(prefill_url)
 
     # ── UI ────────────────────────────────────────────────────────────────
     def _build_ui(self) -> None:
@@ -61,7 +64,9 @@ class RunWizard(QDialog):
 
         # 단계 표시
         self._step_lbl = QLabel("Step 1 / 3")
-        self._step_lbl.setStyleSheet("font-weight:bold; color:#2563eb;")
+        self._step_lbl.setStyleSheet(
+            "font-weight:600; color:#0066cc; font-size:12px; letter-spacing:0.5px;"
+        )
         root.addWidget(self._step_lbl)
 
         # 스택

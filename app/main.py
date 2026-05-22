@@ -13,6 +13,7 @@ from app.ui.dashboard import Dashboard
 from app.ui.wizard import RunWizard
 from app.ui.pipeline_view import PipelineView
 from app.ui.reviewer_gate import ReviewerGate
+from app.ui.theme import APPLE_QSS
 
 
 def main() -> None:
@@ -20,6 +21,7 @@ def main() -> None:
     app.setApplicationName("AWT")
     app.setApplicationVersion("1.0.0")
     app.setStyle("Fusion")
+    app.setStyleSheet(APPLE_QSS)
 
     # DB 설정
     db_cfg = DBConfig.from_env()
@@ -45,9 +47,17 @@ def main() -> None:
         sys.exit(0)
 
     # ── 대시보드 ──────────────────────────────────────────────────────────
-    dash = Dashboard(token=token, username=username, role=role, api_key=api_key, db=db)
-
     _pipeline_views: list[PipelineView] = []
+    dash: Dashboard | None = None
+
+    def _make_dashboard() -> None:
+        nonlocal dash
+        dash = Dashboard(token=token, username=username, role=role, api_key=api_key, db=db)
+        dash.new_run_requested.connect(_open_wizard)
+        dash.open_run_requested.connect(_reopen_run)
+        dash.clone_run_requested.connect(_clone_run)
+        dash.logout_requested.connect(_do_logout)
+        dash.show()
 
     def _open_wizard() -> None:
         # 설정 탭에서 키를 저장한 경우를 위해 항상 최신값 로드
@@ -90,9 +100,34 @@ def main() -> None:
                 "진행 중인 실행은 Pipeline View에서 확인하세요."
             )
 
-    dash.new_run_requested.connect(_open_wizard)
-    dash.open_run_requested.connect(_reopen_run)
-    dash.show()
+    def _clone_run(url: str) -> None:
+        """이력 우클릭 → 복제: URL 클립보드 복사 + wizard prefill."""
+        current_key = load_api_key() or api_key
+        if not current_key or current_key.startswith("AIza여기에") or current_key.startswith("sk-ant-여기에") or current_key.startswith("sk-여기에"):
+            QMessageBox.warning(
+                dash, "API Key 미설정",
+                "LLM API Key가 설정되지 않았습니다.\n"
+                "대시보드 → 설정 탭에서 API Key를 먼저 저장해주세요."
+            )
+            return
+        wiz = RunWizard(api_key=current_key, prefill_url=url, parent=dash)
+        wiz.run_config_ready.connect(_start_pipeline)
+        wiz.exec()
+
+    def _do_logout() -> None:
+        """로그아웃 → 대시보드 닫고 로그인 화면 재표시."""
+        nonlocal token, username, api_key, role, dash
+        if dash:
+            dash.close()
+            dash = None
+        new_login = LoginWindow(db_config=db_cfg)
+        new_login.logged_in.connect(_on_logged_in)
+        if new_login.exec() == LoginWindow.Accepted:
+            _make_dashboard()
+        else:
+            app.quit()
+
+    _make_dashboard()
 
     sys.exit(app.exec())
 

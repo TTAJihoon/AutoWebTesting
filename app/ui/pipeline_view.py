@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.orchestrator import Orchestrator, RunConfig
+from app.ui.theme import pill_btn, utility_btn
 
 
 class _PreGateWorker(QThread):
@@ -30,10 +31,11 @@ class _PreGateWorker(QThread):
 
     def run(self) -> None:
         try:
+            feature_spec = None
             if not self._has_files:
-                self._orch.run_stage0()
+                feature_spec = self._orch.run_stage0()
                 self.stage_done.emit(1)
-            self._orch.run_stage1()
+            self._orch.run_stage1(feature_spec)
             self.stage_done.emit(2)
             self._orch.run_stage2()
             self.stage_done.emit(3)
@@ -102,20 +104,31 @@ class PipelineView(QMainWindow):
         info_row.addStretch()
         self._run_btn = QPushButton("Stage 1~3 실행")
         self._run_btn.setStyleSheet(
-            "QPushButton{background:#16a34a;color:white;border-radius:4px;padding:4px 14px;}"
-            "QPushButton:hover{background:#15803d;}"
-            "QPushButton:disabled{background:#86efac;}"
+            pill_btn(bg="#1a7a3c", bg_hover="#15803d", bg_pressed="#0f6030",
+                     bg_disabled="#86efac", fg_disabled="#ffffff")
         )
         self._run_btn.clicked.connect(self._start_pre_gate)
         info_row.addWidget(self._run_btn)
         root.addLayout(info_row)
 
-        # 진행 바
+        # 진행 바 (Stage N/7)
         self._progress_bar = QProgressBar()
         self._progress_bar.setRange(0, 7)
         self._progress_bar.setValue(0)
         self._progress_bar.setFormat("Stage %v / 7")
         root.addWidget(self._progress_bar)
+
+        # 로딩 표시 — 동작 중일 때만 표시되는 얇은 indeterminate 바
+        self._busy_bar = QProgressBar()
+        self._busy_bar.setRange(0, 0)       # indeterminate 애니메이션
+        self._busy_bar.setFixedHeight(4)
+        self._busy_bar.setTextVisible(False)
+        self._busy_bar.setStyleSheet(
+            "QProgressBar{border:none;background:#e5e7eb;border-radius:2px;}"
+            "QProgressBar::chunk{background:#2563eb;border-radius:2px;}"
+        )
+        self._busy_bar.setVisible(False)
+        root.addWidget(self._busy_bar)
 
         # 스플리터: 로그 | TC 테이블
         splitter = QSplitter(Qt.Horizontal)
@@ -145,9 +158,7 @@ class PipelineView(QMainWindow):
         self._gate_btn = QPushButton("Stage 4: Reviewer Gate →")
         self._gate_btn.setEnabled(False)
         self._gate_btn.setStyleSheet(
-            "QPushButton{background:#7c3aed;color:white;border-radius:4px;padding:4px 14px;}"
-            "QPushButton:hover{background:#6d28d9;}"
-            "QPushButton:disabled{background:#c4b5fd;}"
+            utility_btn(bg="#5e35b1", bg_hover="#4527a0")
         )
         self._gate_btn.clicked.connect(self._open_gate)
         tc_lay.addWidget(self._gate_btn)
@@ -155,9 +166,7 @@ class PipelineView(QMainWindow):
         self._exec_btn = QPushButton("Stage 5~7 실행")
         self._exec_btn.setEnabled(False)
         self._exec_btn.setStyleSheet(
-            "QPushButton{background:#2563eb;color:white;border-radius:4px;padding:4px 14px;}"
-            "QPushButton:hover{background:#1d4ed8;}"
-            "QPushButton:disabled{background:#93c5fd;}"
+            pill_btn(bg_disabled="#93c5fd", fg_disabled="#ffffff")
         )
         self._exec_btn.clicked.connect(self._start_post_gate)
         tc_lay.addWidget(self._exec_btn)
@@ -173,7 +182,8 @@ class PipelineView(QMainWindow):
         self._run_btn.setEnabled(False)
         self._log.clear()
         self._progress_bar.setValue(0)
-        self._append_log(f"[{datetime.now():%H:%M:%S}] Stage 1~3 시작...")
+        self._busy_bar.setVisible(True)
+        self._append_log("Stage 1~3 시작...")
 
         self._pre_worker = _PreGateWorker(
             orch=self._orch,
@@ -188,9 +198,10 @@ class PipelineView(QMainWindow):
         self._tcs = tcs
         self._refresh_tc_table()
         self._gate_btn.setEnabled(True)
+        self._busy_bar.setVisible(False)
         self._write_meta("stage3_done")
-        self._append_log(f"[{datetime.now():%H:%M:%S}] Stage 3 완료 — TC {len(tcs)}개. Reviewer Gate를 진행하세요.")
-        self.statusBar().showMessage(f"Stage 3 완료 — TC {len(tcs)}개")
+        self._append_log(f"Stage 3 완료 - TC {len(tcs)}개. Reviewer Gate를 진행하세요.")
+        self.statusBar().showMessage(f"Stage 3 완료 - TC {len(tcs)}개")
 
     # ── Stage 4 Gate ─────────────────────────────────────────────────────
     def _open_gate(self) -> None:
@@ -203,12 +214,13 @@ class PipelineView(QMainWindow):
         self._exec_btn.setEnabled(True)
         self._gate_btn.setEnabled(False)
         self._write_meta("stage4_done")
-        self._append_log(f"[{datetime.now():%H:%M:%S}] Gate 결정 반영 완료. Stage 5~7을 실행하세요.")
+        self._append_log("Gate 결정 반영 완료. Stage 5~7을 실행하세요.")
 
     # ── Stage 5~7 (Post-Gate) ─────────────────────────────────────────────
     def _start_post_gate(self) -> None:
         self._exec_btn.setEnabled(False)
-        self._append_log(f"[{datetime.now():%H:%M:%S}] Stage 5~7 시작...")
+        self._busy_bar.setVisible(True)
+        self._append_log("Stage 5~7 시작...")
 
         self._post_worker = _PostGateWorker(orch=self._orch)
         self._post_worker.stage_done.connect(self._progress_bar.setValue)
@@ -219,8 +231,9 @@ class PipelineView(QMainWindow):
     def _on_post_gate_done(self, out: Path) -> None:
         self._tcs = self._orch.tcs
         self._refresh_tc_table()
+        self._busy_bar.setVisible(False)
         self._write_meta("done")
-        self._append_log(f"[{datetime.now():%H:%M:%S}] 완료 -> {out}")
+        self._append_log(f"완료 -> {out}")
         self.statusBar().showMessage(f"완료: {out.name}")
 
         passed = sum(1 for tc in self._tcs if tc.get("result") == "pass")
@@ -235,13 +248,19 @@ class PipelineView(QMainWindow):
     # ── 오류 처리 ────────────────────────────────────────────────────────
     def _on_error(self, msg: str) -> None:
         self._run_btn.setEnabled(True)
+        self._busy_bar.setVisible(False)
         self._append_log(f"[오류]\n{msg}")
         self.statusBar().showMessage("오류 발생")
         QMessageBox.critical(self, "오류", msg[:800])
 
     # ── UI 갱신 ──────────────────────────────────────────────────────────
     def _append_log(self, msg: str) -> None:
-        self._log.appendPlainText(msg)
+        ts = datetime.now().strftime("%H:%M:%S")
+        line = f"[{ts}] {msg}"
+        self._log.appendPlainText(line)
+        # 자동 스크롤
+        sb = self._log.verticalScrollBar()
+        sb.setValue(sb.maximum())
         self.statusBar().showMessage(msg[:80])
 
     def _refresh_tc_table(self) -> None:

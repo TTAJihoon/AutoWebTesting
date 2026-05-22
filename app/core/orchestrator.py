@@ -38,13 +38,22 @@ class Orchestrator:
 
     def __init__(self, config: RunConfig, progress_cb: Callable[[str], None] | None = None):
         self.config = config
-        self._cb = progress_cb or (lambda msg: None)
+        # _safe_cb 위에서 이미 설정됨
         self.run_dir = RUNS_DIR / config.run_id
         self.run_dir.mkdir(parents=True, exist_ok=True)
+        # progress_cb를 CP949 안전 래퍼로 감쌈 (콘솔 출력 / Qt 모두 호환)
+        def _safe_cb(msg: str) -> None:
+            try:
+                (progress_cb or (lambda m: None))(msg)
+            except UnicodeEncodeError:
+                safe = msg.encode("ascii", errors="replace").decode("ascii")
+                (progress_cb or (lambda m: None))(safe)
+        self._cb = _safe_cb
         self.llm = LLMClient(
             api_key=config.api_key,
             run_id=config.run_id,
             model_override=config.model_override,
+            progress_cb=self._cb,
         )
         self.tcs: list[dict] = []
         self.ingest_result: dict = {}

@@ -125,5 +125,5 @@ def design(
                 tc.setdefault("negative_category", None)
             all_tcs.append(tc)
 
-    _cb(f"Stage 2 완료 — TC {len(all_tcs)}개 생성")
+    _cb(f"Stage 2 완료 - TC {len(all_tcs)}개 생성")
     return all_tcs

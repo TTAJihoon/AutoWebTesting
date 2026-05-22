@@ -53,7 +53,7 @@ def execute(
             if admin_id:
                 fixtures.logged_in_as = "admin"
 
-            _cb("  [D40] GnuBoard5 엔진 초기화 — 픽스처 설정 시작")
+            _cb("  [D40] GnuBoard5 엔진 초기화 - 픽스처 설정 시작")
             try:
                 setup_fixtures(page, base_url, fixtures,
                                admin_id=admin_id, admin_pw=admin_pw, cb=_cb)

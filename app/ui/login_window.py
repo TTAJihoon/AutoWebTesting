@@ -41,7 +41,7 @@ class LoginWindow(QDialog):
     def __init__(self, db_config: DBConfig | None = None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("AWT — 로그인")
-        self.setFixedSize(380, 280)
+        self.setFixedSize(380, 320)
         self.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
 
         self._db = DBClient(db_config)
@@ -51,48 +51,64 @@ class LoginWindow(QDialog):
         self._check_db_available()
 
     def _build_ui(self) -> None:
+        self.setStyleSheet("QDialog{background:#000000;}")
         layout = QVBoxLayout(self)
-        layout.setSpacing(12)
-        layout.setContentsMargins(40, 30, 40, 30)
+        layout.setSpacing(0)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # ── 상단 다크 헤더 영역 ─────────────────────────────────────────
+        header = QWidget()
+        header.setFixedHeight(160)
+        header.setStyleSheet("background:#000000;")
+        h_lay = QVBoxLayout(header)
+        h_lay.setAlignment(Qt.AlignCenter)
+        h_lay.setSpacing(4)
 
         title = QLabel("AWT")
-        title.setFont(QFont("Segoe UI", 20, QFont.Bold))
+        title.setFont(QFont("Segoe UI", 28, QFont.Bold))
         title.setAlignment(Qt.AlignCenter)
-        layout.addWidget(title)
+        title.setStyleSheet("color:#ffffff; background:transparent;")
+        h_lay.addWidget(title)
 
         subtitle = QLabel("AI-driven Web Testing")
         subtitle.setAlignment(Qt.AlignCenter)
-        subtitle.setStyleSheet("color: #666;")
-        layout.addWidget(subtitle)
+        subtitle.setStyleSheet("color:#7a7a7a; font-size:13px; background:transparent;")
+        h_lay.addWidget(subtitle)
+        layout.addWidget(header)
 
-        layout.addSpacing(10)
+        # ── 폼 영역 ─────────────────────────────────────────────────────
+        form = QWidget()
+        form.setStyleSheet("background:#f5f5f7;")
+        f_lay = QVBoxLayout(form)
+        f_lay.setContentsMargins(40, 28, 40, 28)
+        f_lay.setSpacing(10)
 
         self._user_edit = QLineEdit()
         self._user_edit.setPlaceholderText("사용자 ID")
-        self._user_edit.setFixedHeight(36)
-        layout.addWidget(self._user_edit)
+        self._user_edit.setFixedHeight(38)
+        f_lay.addWidget(self._user_edit)
 
         self._pw_edit = QLineEdit()
         self._pw_edit.setPlaceholderText("비밀번호")
         self._pw_edit.setEchoMode(QLineEdit.Password)
-        self._pw_edit.setFixedHeight(36)
+        self._pw_edit.setFixedHeight(38)
         self._pw_edit.returnPressed.connect(self._do_login)
-        layout.addWidget(self._pw_edit)
+        f_lay.addWidget(self._pw_edit)
 
         self._status_lbl = QLabel("")
-        self._status_lbl.setStyleSheet("color: #c00;")
+        self._status_lbl.setStyleSheet(
+            "color:#cc0000; font-size:12px; background:transparent;"
+        )
         self._status_lbl.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self._status_lbl)
+        self._status_lbl.setWordWrap(True)
+        f_lay.addWidget(self._status_lbl)
 
         self._login_btn = QPushButton("로그인")
-        self._login_btn.setFixedHeight(38)
-        self._login_btn.setStyleSheet(
-            "QPushButton { background:#2563eb; color:white; border-radius:4px; font-size:14px; }"
-            "QPushButton:hover { background:#1d4ed8; }"
-            "QPushButton:disabled { background:#93c5fd; }"
-        )
+        self._login_btn.setFixedHeight(40)
         self._login_btn.clicked.connect(self._do_login)
-        layout.addWidget(self._login_btn)
+        f_lay.addWidget(self._login_btn)
+
+        layout.addWidget(form)
 
     def _check_db_available(self) -> None:
         if not DBClient.is_available():

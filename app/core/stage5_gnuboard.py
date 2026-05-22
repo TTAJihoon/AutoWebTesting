@@ -382,7 +382,7 @@ def _register_test_user(
         return
 
     # ── Step 2b: 헬퍼 없을 때 — 로그인 시도로 존재 여부 확인 ──────────
-    cb(f"  [Fixtures] awt_fixture.php 없음 — 로그인으로 계정 확인")
+    cb(f"  [Fixtures] awt_fixture.php 없음 - 로그인으로 계정 확인")
     ok = _login_as(page, base_url, uid, pw)
     if ok:
         fixtures.user_registered = True
