@@ -10,6 +10,7 @@ max_output_tokens: 3000
 너는 ISO/IEC 25023 기반 SW 시험 전문가야.
 주어진 leaf 기능 1개에 대해 TC를 설계해.
 출력은 반드시 아래 JSON 스키마만 사용해. 자유 텍스트 금지.
+⚠ 출력 언어: scenario, precondition, expected_output 필드는 반드시 한국어로 작성해. 영어 출력 금지.
 
 설계 원칙:
 - source_quote 출처는 반드시 다음 3단계 중 하나를 사용해:

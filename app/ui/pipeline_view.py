@@ -17,6 +17,17 @@ from PySide6.QtWidgets import (
 from app.core.orchestrator import Orchestrator, RunConfig
 from app.ui.theme import pill_btn, utility_btn
 
+# 기법 한글 변환 (DESIGN.md 사용자 선택 기준)
+_TECHNIQUE_KO: dict[str, str] = {
+    "happy_path":       "정상 흐름",
+    "negative_basic":   "오류 기본",
+    "negative_deep":    "오류 심층",
+    "boundary":         "경계값 분석",
+    "equivalence":      "동등 분할",
+    "state_transition": "상태 전이",
+    "cross_feature":    "기능 간 연계",
+}
+
 
 class _PreGateWorker(QThread):
     """Stage 0~3 백그라운드 실행."""
@@ -149,9 +160,15 @@ class PipelineView(QMainWindow):
         tc_lay = QVBoxLayout(tc_widget)
         tc_lay.setContentsMargins(0, 0, 0, 0)
         tc_lay.addWidget(QLabel("생성된 TC"))
-        self._tc_table = QTableWidget(0, 5)
-        self._tc_table.setHorizontalHeaderLabels(["TC ID", "시나리오", "기법", "상태", "결과"])
-        self._tc_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self._tc_table = QTableWidget(0, 7)
+        self._tc_table.setHorizontalHeaderLabels(
+            ["TC ID", "시나리오", "입력값", "예상값", "기법", "상태", "결과"]
+        )
+        hdr = self._tc_table.horizontalHeader()
+        hdr.setSectionResizeMode(1, QHeaderView.Stretch)   # 시나리오
+        hdr.setSectionResizeMode(2, QHeaderView.Stretch)   # 입력값
+        hdr.setSectionResizeMode(3, QHeaderView.Stretch)   # 예상값
+        hdr.setDefaultSectionSize(90)
         self._tc_table.setEditTriggers(QTableWidget.NoEditTriggers)
         tc_lay.addWidget(self._tc_table)
 
@@ -280,23 +297,28 @@ class PipelineView(QMainWindow):
         for tc in self._tcs:
             r = self._tc_table.rowCount()
             self._tc_table.insertRow(r)
-            items = [
-                QTableWidgetItem(tc.get("tc_id", "")),
-                QTableWidgetItem(tc.get("scenario", "")[:60]),
-                QTableWidgetItem(tc.get("design_technique", "")),
-                QTableWidgetItem(tc.get("review_status", "pending")),
-                QTableWidgetItem(tc.get("result", "not_executed")),
+
+            technique_en = tc.get("design_technique", "")
+            technique_ko = _TECHNIQUE_KO.get(technique_en, technique_en)
+            status   = tc.get("review_status", "pending")
+            result   = tc.get("result", "not_executed")
+
+            bg       = status_colors.get(status, QColor("white"))
+            res_bg   = result_colors.get(result, QColor("white"))
+
+            cells = [
+                (0, tc.get("tc_id", ""),                   bg),
+                (1, tc.get("scenario", ""),                bg),
+                (2, tc.get("precondition", "")[:80],       bg),
+                (3, tc.get("expected", "")[:80],           bg),
+                (4, technique_ko,                          bg),
+                (5, status,                                bg),
+                (6, result,                                res_bg),
             ]
-            bg = status_colors.get(tc.get("review_status", ""), QColor("white"))
-            for item in items:
-                item.setBackground(bg)
-            self._tc_table.setItem(r, 0, items[0])
-            self._tc_table.setItem(r, 1, items[1])
-            self._tc_table.setItem(r, 2, items[2])
-            self._tc_table.setItem(r, 3, items[3])
-            res_item = items[4]
-            res_item.setBackground(result_colors.get(tc.get("result", ""), QColor("white")))
-            self._tc_table.setItem(r, 4, res_item)
+            for col, text, color in cells:
+                item = QTableWidgetItem(text)
+                item.setBackground(color)
+                self._tc_table.setItem(r, col, item)
 
     # ── 메타 저장 (대시보드 이력용) ───────────────────────────────────────
     def _write_meta(self, stage: str) -> None:

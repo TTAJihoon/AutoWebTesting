@@ -246,7 +246,17 @@ def _add_v10_tcs(
             "negative_categories":  cats_text,
         })
 
-        for tc in result.get("tcs", []):
+        result_tcs = result.get("tcs", [])
+
+        # TC ID 정규화 — LLM이 4단계 ID(TC-003-006-01)를 생성하면 TC-003-006 형식으로 교정
+        for tc in result_tcs:
+            raw_id = tc.get("tc_id", "")
+            if not re.match(r"^TC-\d{3}-\d{3}$", raw_id):
+                fixed = f"TC-{leaf_num}-{next_num:03d}"
+                tc["tc_id"] = fixed
+                next_num += 1
+
+        for tc in result_tcs:
             # 출력 필드 정규화
             if "expected_output" in tc and "expected" not in tc:
                 tc["expected"] = tc.pop("expected_output")
