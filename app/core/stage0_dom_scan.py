@@ -86,7 +86,7 @@ def scan(
                 # DOM_SPEC LLM 호출
                 result = llm_client.call("DOM_SPEC", {
                     "url": cur_url,
-                    "dom_elements_json": json.dumps(elements, ensure_ascii=False)[:6000],
+                    "dom_elements_json": json.dumps(elements, ensure_ascii=False)[:12000],
                 })
                 all_features.extend(result.get("features", []))
 

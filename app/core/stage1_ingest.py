@@ -42,13 +42,34 @@ def ingest(
 
     # Stage 0 결과 있으면 우선 사용
     if feature_spec and feature_spec.get("features"):
-        for i, feat in enumerate(feature_spec["features"], 1):
+        feats = feature_spec["features"]
+        for i, feat in enumerate(feats, 1):
             leaves.append({
                 "requirement_id": f"F{i:03d}",
                 "category_major": feat.get("category_major", ""),
-                "category_mid": feat.get("category_mid", ""),
-                "category_leaf": feat.get("category_leaf", ""),
+                "category_mid":   feat.get("category_mid", ""),
+                "category_leaf":  feat.get("category_leaf", ""),
             })
+
+        # 매뉴얼 파일이 없는 경우 implicit_spec을 manual_text로 합성
+        # → Stage 2 TC_DESIGN이 참조할 텍스트 컨텍스트 확보
+        if not manual_text.strip():
+            spec_lines = [
+                f"# {feature_spec.get('url', 'DOM 스캔 결과')}\n",
+                f"스캔 페이지 수: {feature_spec.get('pages_scanned', '?')}\n",
+            ]
+            for feat in feats:
+                maj = feat.get("category_major", "")
+                mid = feat.get("category_mid", "")
+                lef = feat.get("category_leaf", "")
+                spec = feat.get("implicit_spec", "")
+                src  = feat.get("source_element", "")
+                spec_lines.append(
+                    f"\n## {maj}\n### {mid} — {lef}\n{spec}\n"
+                    f"(근거 요소: {src}  신뢰도: {feat.get('confidence','')})\n"
+                )
+            manual_text = "\n".join(spec_lines)
+            _cb(f"  매뉴얼 없음 → DOM implicit_spec {len(feats)}개를 참조문서로 합성")
     else:
         # 파일에서 기능 목록 추출 (마크다운 헤더 기반 휴리스틱)
         leaves = _extract_leaves_from_text(manual_text)
