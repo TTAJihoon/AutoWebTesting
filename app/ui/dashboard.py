@@ -64,44 +64,58 @@ class Dashboard(QMainWindow):
     # ── UI 구성 ──────────────────────────────────────────────────────────
     def _build_ui(self) -> None:
         central = QWidget()
+        central.setStyleSheet("QWidget#dash_central { background-color: #f1f5f9; }")
+        central.setObjectName("dash_central")
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # 상단 헤더 — global-nav (surface-black #000000, h=44px)
+        # ── 상단 헤더 (global-nav) ────────────────────────────────────────
         header = QFrame()
-        header.setFixedHeight(44)
-        header.setStyleSheet("background:#000000; border:none;")
+        header.setFixedHeight(48)
+        header.setStyleSheet("QFrame { background: #000000; border: none; }")
         h_lay = QHBoxLayout(header)
         h_lay.setContentsMargins(20, 0, 20, 0)
         h_lay.setSpacing(0)
+
         lbl = QLabel("AWT")
         lbl.setFont(QFont("Segoe UI", 14, QFont.Bold))
-        lbl.setStyleSheet("color:#ffffff; background:transparent; letter-spacing:1px;")
+        lbl.setStyleSheet("color: #ffffff; background: transparent; border: none; letter-spacing: 1px;")
         h_lay.addWidget(lbl)
         h_lay.addStretch()
+
         user_lbl = QLabel(f"{self._username}  ·  {self._role}")
         user_lbl.setStyleSheet(
-            "color:#7a7a7a; font-size:12px; background:transparent;"
+            "color: #64748b; font-size: 12px; background: transparent; border: none;"
         )
         h_lay.addWidget(user_lbl)
         h_lay.addSpacing(16)
+
         logout_btn = QPushButton("로그아웃")
         logout_btn.setStyleSheet(
-            "QPushButton{background:transparent;color:#7a7a7a;"
-            "border:none;border-radius:0;padding:0 4px;"
-            "font-size:12px;min-height:0;}"
-            "QPushButton:hover{color:#ffffff;}"
+            "QPushButton { background: transparent; color: #64748b; border: none;"
+            " border-radius: 0; padding: 0 4px; font-size: 12px; min-height: 0; }"
+            "QPushButton:hover { color: #ffffff; }"
         )
         logout_btn.setCursor(Qt.PointingHandCursor)
         logout_btn.clicked.connect(self.logout_requested)
         h_lay.addWidget(logout_btn)
         root.addWidget(header)
 
-        # 탭
+        # ── 탭 ───────────────────────────────────────────────────────────
         tabs = QTabWidget()
         tabs.setDocumentMode(True)
+        tabs.setStyleSheet(
+            "QTabWidget::pane { background: #f1f5f9; border: none; }"
+            "QTabBar::tab { background: transparent; color: #64748b;"
+            " padding: 10px 20px; font-size: 13px; font-weight: 500;"
+            " border: none; border-bottom: 2px solid transparent; }"
+            "QTabBar::tab:selected { color: #3b82f6;"
+            " border-bottom: 2px solid #3b82f6; font-weight: 600; }"
+            "QTabBar::tab:hover { color: #1e293b; }"
+            "QTabWidget > QWidget { background: #f1f5f9; }"
+        )
         root.addWidget(tabs)
 
         tabs.addTab(self._build_runs_tab(), "실행 이력")
@@ -114,18 +128,45 @@ class Dashboard(QMainWindow):
         self.statusBar().showMessage("준비")
 
     def _build_runs_tab(self) -> QWidget:
-        w = QWidget()
-        lay = QVBoxLayout(w)
-        lay.setContentsMargins(16, 12, 16, 12)
+        outer = QWidget()
+        outer.setStyleSheet("background: #f1f5f9;")
+        outer_lay = QVBoxLayout(outer)
+        outer_lay.setContentsMargins(12, 12, 12, 12)
+        outer_lay.setSpacing(8)
 
+        # 카드
+        card = QFrame()
+        card.setStyleSheet(
+            "QFrame { background: #ffffff; border-radius: 8px;"
+            " border: 1px solid #e2e8f0; }"
+        )
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(16, 14, 16, 16)
+        lay.setSpacing(10)
+
+        # 상단: 제목 + 새 실행 버튼
         top = QHBoxLayout()
+        hdr = QLabel("실행 이력")
+        hdr.setStyleSheet(
+            "QLabel { background: transparent; border: none;"
+            " font-size: 15px; font-weight: 700; color: #1e293b; }"
+        )
+        top.addWidget(hdr)
+        top.addStretch()
+
         self._new_btn = QPushButton("＋  새 실행")
         self._new_btn.setFixedHeight(34)
+        self._new_btn.setStyleSheet(
+            "QPushButton { background: #3b82f6; color: #ffffff;"
+            " border-radius: 6px; padding: 0 16px; font-size: 13px;"
+            " font-weight: 600; border: none; }"
+            "QPushButton:hover { background: #2563eb; }"
+        )
         self._new_btn.clicked.connect(self.new_run_requested)
         top.addWidget(self._new_btn)
-        top.addStretch()
         lay.addLayout(top)
 
+        # 테이블
         self._runs_table = QTableWidget(0, 5)
         self._runs_table.setHorizontalHeaderLabels(["Run ID", "대상 URL", "TC 수", "단계", "일시"])
         self._runs_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
@@ -134,17 +175,51 @@ class Dashboard(QMainWindow):
         self._runs_table.doubleClicked.connect(self._open_run)
         self._runs_table.setContextMenuPolicy(Qt.CustomContextMenu)
         self._runs_table.customContextMenuRequested.connect(self._on_runs_context_menu)
+        self._runs_table.setStyleSheet(
+            "QTableWidget { border: none; background: #ffffff; }"
+            "QHeaderView::section { background-color: #f8fafc; color: #64748b;"
+            " font-size: 12px; font-weight: 600; padding: 7px 8px;"
+            " border: none; border-bottom: 1px solid #e2e8f0; }"
+            "QTableWidget::item { border-bottom: 1px solid #f1f5f9;"
+            " padding: 6px 8px; color: #334155; }"
+            "QTableWidget::item:selected { background: #eff6ff; color: #1e293b; }"
+        )
         lay.addWidget(self._runs_table)
-        return w
+        outer_lay.addWidget(card)
+        return outer
 
     def _build_settings_tab(self) -> QWidget:
-        w = QWidget()
-        lay = QVBoxLayout(w)
-        lay.setContentsMargins(32, 24, 32, 24)
-        lay.setSpacing(16)
+        outer = QWidget()
+        outer.setStyleSheet("background: #f1f5f9;")
+        outer_lay = QVBoxLayout(outer)
+        outer_lay.setContentsMargins(12, 12, 12, 12)
+        outer_lay.setSpacing(8)
 
-        # ── Provider 선택 (D48) ───────────────────────────────────────────
-        lay.addWidget(QLabel("LLM Provider"))
+        # 카드
+        card = QFrame()
+        card.setStyleSheet(
+            "QFrame { background: #ffffff; border-radius: 8px;"
+            " border: 1px solid #e2e8f0; }"
+        )
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(28, 22, 28, 22)
+        lay.setSpacing(14)
+
+        hdr = QLabel("API 설정")
+        hdr.setStyleSheet(
+            "QLabel { background: transparent; border: none;"
+            " font-size: 15px; font-weight: 700; color: #1e293b;"
+            " padding-bottom: 4px; border-bottom: 1px solid #f1f5f9; }"
+        )
+        lay.addWidget(hdr)
+
+        # ── Provider 선택 ─────────────────────────────────────────────────
+        lbl_prov = QLabel("LLM Provider")
+        lbl_prov.setStyleSheet(
+            "QLabel { font-size: 12px; font-weight: 600; color: #374151;"
+            " background: transparent; border: none; }"
+        )
+        lay.addWidget(lbl_prov)
         self._provider_combo = QComboBox()
         for p in VALID_PROVIDERS:
             self._provider_combo.addItem(_PROVIDER_LABELS[p], userData=p)
@@ -154,33 +229,64 @@ class Dashboard(QMainWindow):
         self._provider_combo.currentIndexChanged.connect(self._on_provider_changed)
         lay.addWidget(self._provider_combo)
 
-        # ── API Key (활성 provider 기준) ──────────────────────────────────
+        # ── API Key ───────────────────────────────────────────────────────
         self._api_label = QLabel(f"{_PROVIDER_LABELS[current]} API Key")
+        self._api_label.setStyleSheet(
+            "QLabel { font-size: 12px; font-weight: 600; color: #374151;"
+            " background: transparent; border: none; }"
+        )
         lay.addWidget(self._api_label)
+
         api_row = QHBoxLayout()
+        api_row.setSpacing(8)
         self._api_edit = QLineEdit(load_api_key(current) or "")
         self._api_edit.setEchoMode(QLineEdit.Password)
         self._api_edit.setPlaceholderText(_PROVIDER_PLACEHOLDERS[current])
+        self._api_edit.setFixedHeight(36)
         api_row.addWidget(self._api_edit)
+
+        _btn_style = (
+            "QPushButton { border-radius: 6px; padding: 0 14px; font-size: 12px;"
+            " font-weight: 600; height: 36px; }"
+        )
         save_btn = QPushButton("저장")
+        save_btn.setFixedHeight(36)
+        save_btn.setStyleSheet(
+            _btn_style +
+            "QPushButton { background: #3b82f6; color: #fff; border: none; }"
+            "QPushButton:hover { background: #2563eb; }"
+        )
         save_btn.clicked.connect(self._save_api_key)
         api_row.addWidget(save_btn)
+
         del_btn = QPushButton("삭제")
+        del_btn.setFixedHeight(36)
+        del_btn.setStyleSheet(
+            _btn_style +
+            "QPushButton { background: #fff; color: #ef4444;"
+            " border: 1px solid #fca5a5; }"
+            "QPushButton:hover { background: #fee2e2; }"
+        )
         del_btn.clicked.connect(self._delete_api_key)
         api_row.addWidget(del_btn)
         lay.addLayout(api_row)
 
-        # 안내 라벨
+        # 안내
         hint = QLabel(
             "Provider별 API 키는 각각 따로 저장됩니다. Provider 전환 시 해당 키만 사용됩니다.\n"
             "모델은 prompts/*.md 의 model 필드(claude-* / gpt-* / gemini-*)로 결정됩니다."
         )
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #888; font-size: 11px;")
+        hint.setStyleSheet(
+            "QLabel { color: #94a3b8; font-size: 11px;"
+            " background: transparent; border: none; }"
+        )
         lay.addWidget(hint)
-
         lay.addStretch()
-        return w
+
+        outer_lay.addWidget(card)
+        outer_lay.addStretch()
+        return outer
 
     def _on_provider_changed(self, index: int) -> None:
         """Provider 드롭다운 변경 시 — 활성 provider 갱신 + 해당 키 로드."""

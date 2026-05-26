@@ -3,7 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QDialog, QWidget, QLabel, QLineEdit, QPushButton,
+    QDialog, QFrame, QWidget, QLabel, QLineEdit, QPushButton,
     QVBoxLayout, QHBoxLayout, QMessageBox, QCheckBox,
 )
 
@@ -41,7 +41,7 @@ class LoginWindow(QDialog):
     def __init__(self, db_config: DBConfig | None = None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("AWT — 로그인")
-        self.setFixedSize(380, 320)
+        self.setFixedSize(380, 340)
         self.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
 
         self._db = DBClient(db_config)
@@ -51,15 +51,29 @@ class LoginWindow(QDialog):
         self._check_db_available()
 
     def _build_ui(self) -> None:
-        self.setStyleSheet("QDialog{background:#000000;}")
-        layout = QVBoxLayout(self)
-        layout.setSpacing(0)
-        layout.setContentsMargins(0, 0, 0, 0)
+        self.setStyleSheet("QDialog { background-color: #f1f5f9; }")
 
-        # ── 상단 다크 헤더 영역 ─────────────────────────────────────────
-        header = QWidget()
-        header.setFixedHeight(160)
-        header.setStyleSheet("background:#000000;")
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 24, 24, 24)
+        root.setSpacing(0)
+
+        # ── 카드 컨테이너 ────────────────────────────────────────────────
+        card = QFrame()
+        card.setStyleSheet(
+            "QFrame { background: #ffffff; border-radius: 12px;"
+            " border: 1px solid #e2e8f0; }"
+        )
+        card_lay = QVBoxLayout(card)
+        card_lay.setContentsMargins(0, 0, 0, 0)
+        card_lay.setSpacing(0)
+
+        # ── 상단 다크 헤더 ───────────────────────────────────────────────
+        header = QFrame()
+        header.setFixedHeight(108)
+        header.setStyleSheet(
+            "QFrame { background: #1e293b; border-radius: 12px 12px 0 0;"
+            " border: none; }"
+        )
         h_lay = QVBoxLayout(header)
         h_lay.setAlignment(Qt.AlignCenter)
         h_lay.setSpacing(4)
@@ -67,48 +81,59 @@ class LoginWindow(QDialog):
         title = QLabel("AWT")
         title.setFont(QFont("Segoe UI", 28, QFont.Bold))
         title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("color:#ffffff; background:transparent;")
+        title.setStyleSheet("color: #ffffff; background: transparent; border: none;")
         h_lay.addWidget(title)
 
         subtitle = QLabel("AI-driven Web Testing")
         subtitle.setAlignment(Qt.AlignCenter)
-        subtitle.setStyleSheet("color:#7a7a7a; font-size:13px; background:transparent;")
+        subtitle.setStyleSheet(
+            "color: #94a3b8; font-size: 12px; background: transparent; border: none;"
+        )
         h_lay.addWidget(subtitle)
-        layout.addWidget(header)
+        card_lay.addWidget(header)
 
         # ── 폼 영역 ─────────────────────────────────────────────────────
-        form = QWidget()
-        form.setStyleSheet("background:#f5f5f7;")
+        form = QFrame()
+        form.setStyleSheet(
+            "QFrame { background: #ffffff; border-radius: 0 0 12px 12px; border: none; }"
+        )
         f_lay = QVBoxLayout(form)
-        f_lay.setContentsMargins(40, 28, 40, 28)
+        f_lay.setContentsMargins(32, 24, 32, 24)
         f_lay.setSpacing(10)
 
         self._user_edit = QLineEdit()
         self._user_edit.setPlaceholderText("사용자 ID")
-        self._user_edit.setFixedHeight(38)
+        self._user_edit.setFixedHeight(40)
         f_lay.addWidget(self._user_edit)
 
         self._pw_edit = QLineEdit()
         self._pw_edit.setPlaceholderText("비밀번호")
         self._pw_edit.setEchoMode(QLineEdit.Password)
-        self._pw_edit.setFixedHeight(38)
+        self._pw_edit.setFixedHeight(40)
         self._pw_edit.returnPressed.connect(self._do_login)
         f_lay.addWidget(self._pw_edit)
 
         self._status_lbl = QLabel("")
         self._status_lbl.setStyleSheet(
-            "color:#cc0000; font-size:12px; background:transparent;"
+            "color: #ef4444; font-size: 12px; background: transparent; border: none;"
         )
         self._status_lbl.setAlignment(Qt.AlignCenter)
         self._status_lbl.setWordWrap(True)
         f_lay.addWidget(self._status_lbl)
 
         self._login_btn = QPushButton("로그인")
-        self._login_btn.setFixedHeight(40)
+        self._login_btn.setFixedHeight(42)
+        self._login_btn.setStyleSheet(
+            "QPushButton { background: #3b82f6; color: #ffffff;"
+            " border-radius: 6px; font-size: 14px; font-weight: 600; border: none; }"
+            "QPushButton:hover { background: #2563eb; }"
+            "QPushButton:disabled { background: #93c5fd; }"
+        )
         self._login_btn.clicked.connect(self._do_login)
         f_lay.addWidget(self._login_btn)
+        card_lay.addWidget(form)
 
-        layout.addWidget(form)
+        root.addWidget(card)
 
     def _check_db_available(self) -> None:
         if not DBClient.is_available():
