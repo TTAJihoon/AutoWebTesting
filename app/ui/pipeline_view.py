@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFrame,
     QLabel, QPushButton, QPlainTextEdit,
     QSplitter, QTableWidget, QTableWidgetItem, QHeaderView,
-    QMessageBox, QStatusBar,
+    QMessageBox, QStatusBar, QFileDialog,
 )
 
 from app.core.orchestrator import Orchestrator, RunConfig
@@ -131,6 +131,11 @@ class PipelineView(QMainWindow):
 
     gate_review_requested = Signal(list)
     _log_signal = Signal(str)
+
+    @property
+    def config(self) -> RunConfig:
+        """main.py에서 run_id 접근용 (pv.config.run_id)."""
+        return self._config
 
     def __init__(self, config: RunConfig, parent=None):
         super().__init__(parent)
@@ -341,6 +346,19 @@ class PipelineView(QMainWindow):
         self._run_btn.clicked.connect(self._start_pre_gate)
         bot_lay.addWidget(self._run_btn)
 
+        # 기능목록 Excel 다운로드 버튼 (Stage 0 실행 후 Stage 3 완료 시 표시)
+        self._feature_dl_btn = QPushButton("⬇ 기능목록 Excel")
+        self._feature_dl_btn.setVisible(False)
+        self._feature_dl_btn.setStyleSheet(
+            "QPushButton {"
+            " background-color: #0f766e; color: #ffffff;"
+            " border: none; border-radius: 6px;"
+            " padding: 6px 14px; font-size: 12px; font-weight: 600; }"
+            "QPushButton:hover { background-color: #0d9488; }"
+        )
+        self._feature_dl_btn.clicked.connect(self._export_features)
+        bot_lay.addWidget(self._feature_dl_btn)
+
         # Stage 4 Reviewer Gate 버튼 (Stage 3 완료 후 표시)
         self._gate_btn = QPushButton("Stage 4: Reviewer Gate 실행")
         self._gate_btn.setEnabled(False)
@@ -415,6 +433,9 @@ class PipelineView(QMainWindow):
         self._exec_btn.setEnabled(False)
         self._gate_btn.setVisible(True)
         self._gate_btn.setEnabled(True)
+        # Stage 0 스캔 결과 있으면 기능목록 다운로드 버튼 표시
+        feature_draft = self._orch.run_dir / "dom-scan" / "feature-spec-draft.json"
+        self._feature_dl_btn.setVisible(feature_draft.exists())
         self._write_meta("stage3_done")
         self._set_status(f"Stage 3 완료  |  TC {len(tcs)}개", active=True)
         self._append_log(f"Stage 3 완료 - TC {len(tcs)}개. Reviewer Gate를 진행하세요.")
@@ -470,6 +491,40 @@ class PipelineView(QMainWindow):
             f"tc_final.xlsx 생성 완료\n\n"
             f"총 {total}개  PASS {passed}  FAIL {failed}\n\n{out}"
         )
+
+    # ── 기능목록 Excel 다운로드 ───────────────────────────────────────────────
+    def _export_features(self) -> None:
+        """Stage 0 기능 목록(feature-spec-draft.json)을 Excel로 저장."""
+        draft_path = self._orch.run_dir / "dom-scan" / "feature-spec-draft.json"
+        if not draft_path.exists():
+            QMessageBox.warning(self, "알림", "Stage 0 DOM 스캔 결과가 없습니다.")
+            return
+
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "기능 목록 저장",
+            f"feature_list_{self._config.run_id}.xlsx",
+            "Excel 파일 (*.xlsx);;모든 파일 (*.*)",
+        )
+        if not save_path:
+            return
+
+        try:
+            import json
+            from app.tools.excel_builder import build_features
+            draft    = json.loads(draft_path.read_text(encoding="utf-8"))
+            features = draft.get("features", [])
+            if not features:
+                QMessageBox.information(self, "알림", "추출된 기능이 없습니다 (features: 0개).")
+                return
+            build_features(features, save_path)
+            QMessageBox.information(
+                self, "저장 완료",
+                f"기능 목록 {len(features)}개를 저장했습니다:\n{save_path}\n\n"
+                f"스크린샷 파일은:\n{self._orch.run_dir / 'dom-scan' / 'screenshots'}",
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "저장 실패", str(e))
 
     # ── 오류 처리 ─────────────────────────────────────────────────────────────
     def _on_error(self, msg: str) -> None:

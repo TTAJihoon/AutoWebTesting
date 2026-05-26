@@ -102,10 +102,11 @@ def design(
             # TC-{leaf_num:03d}-{tc_idx:03d} 형식 보장 (예: TC-001-003)
             tc["tc_id"] = f"TC-{leaf_num}-{tc_idx:03d}"
             # G1 필드 보강
-            tc["대분류"] = leaf["category_major"]
-            tc["중분류"] = leaf["category_mid"]
-            tc["소분류"] = leaf["category_leaf"]
-            tc["requirement_id"] = leaf["requirement_id"]
+            tc["대분류"]          = leaf["category_major"]
+            tc["중분류"]          = leaf["category_mid"]
+            tc["소분류"]          = leaf["category_leaf"]
+            tc["requirement_id"]  = leaf["requirement_id"]
+            tc["screenshot_file"] = leaf.get("screenshot_file", "")  # Stage 0 스크린샷 연결
             # G4 초기화
             tc.setdefault("review_status", "pending")
             tc.setdefault("reviewer_note", "")

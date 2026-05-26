@@ -45,10 +45,11 @@ def ingest(
         feats = feature_spec["features"]
         for i, feat in enumerate(feats, 1):
             leaves.append({
-                "requirement_id": f"F{i:03d}",
-                "category_major": feat.get("category_major", ""),
-                "category_mid":   feat.get("category_mid", ""),
-                "category_leaf":  feat.get("category_leaf", ""),
+                "requirement_id":  f"F{i:03d}",
+                "category_major":  feat.get("category_major", ""),
+                "category_mid":    feat.get("category_mid", ""),
+                "category_leaf":   feat.get("category_leaf", ""),
+                "screenshot_file": feat.get("screenshot_file", ""),  # Stage 0 스크린샷 연결
             })
 
         # 매뉴얼 파일이 없는 경우 implicit_spec을 manual_text로 합성
