@@ -144,7 +144,7 @@ class Dashboard(QMainWindow):
         lay.setContentsMargins(16, 14, 16, 16)
         lay.setSpacing(10)
 
-        # 상단: 제목 + 새 실행 버튼
+        # 상단: 제목 + 새로고침 + 새 실행 버튼
         top = QHBoxLayout()
         hdr = QLabel("실행 이력")
         hdr.setStyleSheet(
@@ -153,6 +153,18 @@ class Dashboard(QMainWindow):
         )
         top.addWidget(hdr)
         top.addStretch()
+
+        refresh_btn = QPushButton("↺  새로고침")
+        refresh_btn.setFixedHeight(34)
+        refresh_btn.setStyleSheet(
+            "QPushButton { background: #ffffff; color: #64748b;"
+            " border-radius: 6px; padding: 0 14px; font-size: 13px;"
+            " font-weight: 600; border: 1px solid #e2e8f0; }"
+            "QPushButton:hover { background: #f8fafc; color: #1e293b; }"
+        )
+        refresh_btn.clicked.connect(self._load_runs)
+        top.addWidget(refresh_btn)
+        top.addSpacing(8)
 
         self._new_btn = QPushButton("＋  새 실행")
         self._new_btn.setFixedHeight(34)

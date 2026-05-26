@@ -96,18 +96,41 @@ def main() -> None:
         pv.show()
 
     def _reopen_run(run_id: str) -> None:
-        """이력에서 기존 실행 재오픈 (결과 열람 전용)."""
+        """이력 더블클릭 — 진행 중이면 PipelineView 포커스, 완료면 Excel 열기."""
+        # ① 열려 있는 PipelineView 탐색 (최소화 상태도 포함)
+        for pv in _pipeline_views:
+            if (hasattr(pv, "config")
+                    and pv.config.run_id == run_id
+                    and not pv.isHidden()):
+                if pv.isMinimized():
+                    pv.showNormal()
+                pv.raise_()
+                pv.activateWindow()
+                return
+
+        # ② 완료된 실행 — tc_final.xlsx 열기
         run_dir = Path("data/runs") / run_id
         tc_final = run_dir / "tc_final.xlsx"
         if tc_final.exists():
             import subprocess
             subprocess.Popen(["explorer", str(tc_final)])
-        else:
-            QMessageBox.information(
-                dash, "알림",
-                f"run_id={run_id} 의 tc_final.xlsx가 없습니다.\n"
-                "진행 중인 실행은 Pipeline View에서 확인하세요."
-            )
+            return
+
+        # ③ 진행 중도 아니고 완료도 아닌 경우 (중단된 실행 등)
+        tc_verified = run_dir / "tc_verified.json"
+        stage_hint = ""
+        if tc_verified.exists():
+            stage_hint = "Stage 3까지 완료된 실행입니다.\n"
+        elif (run_dir / "tc_raw.json").exists():
+            stage_hint = "Stage 2까지 완료된 실행입니다.\n"
+
+        QMessageBox.information(
+            dash, "실행 정보",
+            f"Run ID: {run_id}\n"
+            f"{stage_hint}"
+            "열려 있는 Pipeline View가 없고 최종 Excel도 없습니다.\n"
+            "새 실행을 시작하거나 우클릭 → 복제로 재실행하세요.",
+        )
 
     def _clone_run(url: str) -> None:
         """이력 우클릭 → 복제: URL 클립보드 복사 + wizard prefill."""
