@@ -4,7 +4,7 @@ AWT 프로젝트의 **모든 설계 결정의 단일 출처**. 구현은 이 문
 
 ---
 
-## 핵심 7개 문서
+## 핵심 문서
 
 | # | 파일 | 내용 | 읽는 순서 |
 |---|---|---|---|
@@ -15,6 +15,7 @@ AWT 프로젝트의 **모든 설계 결정의 단일 출처**. 구현은 이 문
 | 5 | [05-poc-plan.md](05-poc-plan.md) | PoC-α/β/γ 계획 + 진행 상황 | 진행 중 |
 | 6 | [06-decisions.md](06-decisions.md) | D1~D48 확정 + 미해결 질문 (주제별) | 참조용 |
 | 7 | [07-llm-providers.md](07-llm-providers.md) | LLM provider 추상화 (Anthropic/OpenAI/Gemini) | 02 보완 |
+| 8 | [AWT_장점분석.md](AWT_장점분석.md) | 기본 접근법(LLM 직접 요청) 대비 AWT 장점 — 항목별 상세 분석 | 소개·발표용 |
 
 ---
 
