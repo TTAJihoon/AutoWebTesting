@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QFileDialog, QListWidget, QListWidgetItem,
-    QDoubleSpinBox, QTableWidget, QTableWidgetItem,
+    QDoubleSpinBox, QSpinBox, QTableWidget, QTableWidgetItem,
     QHeaderView, QStackedWidget, QWidget, QCheckBox,
     QMessageBox, QGroupBox, QComboBox,
 )
@@ -192,6 +192,23 @@ class RunWizard(QDialog):
         t_lay.addWidget(self._thresh_spin)
         lay.addWidget(thresh_box)
 
+        # ── 최대 기능 수 (max_leaves) ────────────────────────────────────
+        leaves_box = QGroupBox("최대 분석 기능 수 (TC 설계)")
+        l_lay = QVBoxLayout(leaves_box)
+        self._max_leaves_spin = QSpinBox()
+        self._max_leaves_spin.setRange(0, 9999)
+        self._max_leaves_spin.setSingleStep(10)
+        self._max_leaves_spin.setValue(50)
+        self._max_leaves_spin.setSuffix("  개  (0 = 무제한)")
+        l_lay.addWidget(self._max_leaves_spin)
+        leaves_hint = QLabel(
+            "무료 플랜(20회/일): 50개 이하 권장.  유료 플랜: 0으로 설정하면 전체 기능을 처리합니다."
+        )
+        leaves_hint.setWordWrap(True)
+        leaves_hint.setStyleSheet("color:#888; font-size:11px;")
+        l_lay.addWidget(leaves_hint)
+        lay.addWidget(leaves_box)
+
         lay.addStretch()
         summary_lbl = QLabel("설정을 확인하고 '실행 시작'을 클릭하면 파이프라인이 시작됩니다.")
         summary_lbl.setWordWrap(True)
@@ -262,6 +279,7 @@ class RunWizard(QDialog):
             ],
             auth_sequence=self._auth_rows,
             inferred_threshold=self._thresh_spin.value(),
+            max_leaves=self._max_leaves_spin.value(),
             model_override=model_override,
         )
         self.run_config_ready.emit(config)

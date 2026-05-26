@@ -28,6 +28,10 @@ class RunConfig:
     auth_sequence: list[dict] = field(default_factory=list)
     run_id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
     inferred_threshold: float = 0.30
+    max_leaves: int = 50
+    """Stage 2에서 처리할 최대 leaf 수. 0 = 무제한.
+    무료 플랜(20회/일) 기준: 50이면 약 50회 TC_DESIGN 호출 필요.
+    유료 플랜이면 0으로 설정해 제한 없이 실행."""
     model_override: str | None = None
     """Contract frontmatter 모델을 이 모델로 교체. 예: 'gemini-2.5-flash'.
     None이면 각 Contract의 model 그대로 사용."""
@@ -97,6 +101,7 @@ class Orchestrator:
             leaves=self.ingest_result["leaves"],
             manual_text=self.ingest_result["manual_text"],
             llm_client=self.llm,
+            max_leaves=self.config.max_leaves,
             progress_cb=self._cb,
         )
         self._save_intermediate("tc_raw")

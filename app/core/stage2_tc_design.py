@@ -49,17 +49,45 @@ def _guess_feature_type(leaf_name: str) -> str:
     return "OTHER"
 
 
+_CONFIDENCE_ORDER = {"HIGH": 0, "MID": 1, "INFERRED": 2, "": 3}
+
+
+def _prioritize_leaves(leaves: list[dict], max_leaves: int) -> list[dict]:
+    """신뢰도(HIGH→MID→INFERRED) 우선 정렬 후 max_leaves 개수로 자름.
+    max_leaves=0이면 자르지 않음.
+    """
+    if max_leaves <= 0 or len(leaves) <= max_leaves:
+        return leaves
+    sorted_leaves = sorted(
+        leaves,
+        key=lambda lf: _CONFIDENCE_ORDER.get(
+            str(lf.get("confidence", "")).upper(), 3
+        ),
+    )
+    return sorted_leaves[:max_leaves]
+
+
 def design(
     leaves: list[dict],
     manual_text: str,
     llm_client,
     defect_patterns: str = "",  # 하위 호환 (사용 안 함, 자산에서 로드)
+    max_leaves: int = 0,        # 0 = 무제한; >0이면 신뢰도 우선으로 상위 N개만 처리
     progress_cb: Callable[[str], None] | None = None,
 ) -> list[dict]:
     """모든 leaf에 대해 TC를 생성해 단일 리스트로 반환."""
     def _cb(msg: str):
         if progress_cb:
             progress_cb(msg)
+
+    # max_leaves 적용 (API 비용·무료 쿼터 보호)
+    original_count = len(leaves)
+    leaves = _prioritize_leaves(leaves, max_leaves)
+    if max_leaves > 0 and original_count > max_leaves:
+        _cb(
+            f"TC 설계 대상 leaf {original_count}개 → 상위 {len(leaves)}개로 제한 "
+            f"(max_leaves={max_leaves}; 해제하려면 설정에서 0으로 변경)"
+        )
 
     # 제품 유형 분류 (전체 매뉴얼 기준)
     product_type_ids = classify_product_types(manual_text)

@@ -21,6 +21,18 @@ from app.tools import cache as cache_store
 _LOG_DIR = Path("data/runs")
 
 
+def _extract_retry_delay(err_str: str) -> int | None:
+    """API 오류 응답의 'retryDelay' 필드에서 권장 대기 시간(초)을 추출."""
+    m = re.search(r"'retryDelay':\s*'(\d+)s'", err_str)
+    if m:
+        return int(m.group(1))
+    # "Please retry in N.Ns" 형식도 처리
+    m2 = re.search(r"retry in (\d+)[\.\d]*s", err_str)
+    if m2:
+        return int(m2.group(1))
+    return None
+
+
 class LLMClient:
     """LLM 호출 진입점. Stage 코드는 이 클래스의 .call()만 사용한다."""
 
@@ -119,17 +131,34 @@ class LLMClient:
                 json_mode=True,
             )
         except Exception as e:
-            # 일시적 서버/속도 오류 — 최대 5회 지수 백오프 재시도
-            # 500 INTERNAL: Gemini 서버 과부하 (일시적)
-            # 503 UNAVAILABLE / 429 RESOURCE_EXHAUSTED: 속도 제한
+            # ── 오류 분류 ───────────────────────────────────────────────────────
             err_str = str(e)
+
+            # 일일 쿼터 초과(PerDay) — 재시도해도 해결 안 됨, 즉시 중단
+            if "429" in err_str and "PerDay" in err_str:
+                raise RuntimeError(
+                    "Gemini API 일일 쿼터 초과 — 무료 플랜은 모델당 20회/일입니다.\n"
+                    "오늘 사용 가능한 호출 횟수를 모두 소진했습니다.\n"
+                    "\n"
+                    "해결 방법:\n"
+                    "  1) 내일 다시 실행 (무료 플랜 유지)\n"
+                    "  2) Google AI Studio에서 유료 플랜으로 업그레이드\n"
+                    "  3) max_leaves 값을 더 낮게 설정해 호출 횟수 줄이기"
+                ) from e
+
+            # 일시적 서버/속도 오류 — 최대 5회 재시도 (503·500·분당 429)
+            # 500 INTERNAL: Gemini 서버 과부하 (일시적)
+            # 503 UNAVAILABLE / 429 RESOURCE_EXHAUSTED: 분당 속도 제한
             if _retry_count < 5 and any(
                 code in err_str for code in (
                     "500", "503", "429",
                     "INTERNAL", "UNAVAILABLE", "RESOURCE_EXHAUSTED",
                 )
             ):
-                wait_sec = 15 * (2 ** _retry_count)  # 15 → 30 → 60 → 120 → 240초
+                # API가 권장 대기 시간을 제공하면 그 값 사용; 없으면 지수 백오프
+                suggested = _extract_retry_delay(err_str)
+                wait_sec = (suggested + 3) if suggested else (15 * (2 ** _retry_count))
+                wait_sec = min(wait_sec, 300)  # 최대 5분
                 try:
                     self._log_retry(contract_id, _retry_count + 1, wait_sec, err_str)
                 except Exception:
@@ -193,13 +222,57 @@ class LLMClient:
         try:
             return json.loads(text)
         except json.JSONDecodeError as e:
+            err_str = str(e)
+
             # "Extra data" — 첫 번째 완성된 JSON 객체만 추출 (Gemini 재시도 시 간헐 발생)
-            if "Extra data" in str(e):
+            if "Extra data" in err_str:
                 decoder = json.JSONDecoder()
                 obj, _ = decoder.raw_decode(text)
                 if isinstance(obj, dict):
                     return obj
+
+            # "Unterminated string" — max_tokens 초과로 응답이 잘린 경우
+            # tcs 또는 features 배열에서 완성된 요소들만 추출해 부분 결과 반환
+            if "Unterminated string" in err_str or "Expecting" in err_str:
+                partial = self._recover_partial_json(text)
+                if partial:
+                    return partial
             raise
+
+    def _recover_partial_json(self, text: str) -> dict | None:
+        """잘린 JSON에서 완성된 배열 요소만 추출 (max_tokens 초과 시 응급 복구).
+
+        {"tcs": [...]} 또는 {"features": [...]} 형식에서
+        마지막 완성된 배열 요소까지만 파싱해 반환.
+        """
+        # 배열 시작 위치 탐색 ("tcs" or "features" 키)
+        for key in ("tcs", "features"):
+            m = re.search(rf'"{key}"\s*:\s*\[', text)
+            if not m:
+                continue
+            arr_start = m.end() - 1  # '[' 위치
+            # 완성된 요소 개수를 줄여가며 파싱 시도
+            # 마지막 ',' 또는 '{{' 전까지 잘라서 닫기
+            arr_text = text[arr_start:]
+            # 역방향으로 마지막 완성된 '}' 찾기
+            last_brace = arr_text.rfind("},")
+            if last_brace == -1:
+                last_brace = arr_text.rfind("}")
+            if last_brace == -1:
+                continue
+            truncated = arr_text[: last_brace + 1] + "]}"
+            # 앞에 키 복원
+            candidate = text[: m.start()] + f'"{key}": ' + truncated
+            # 앞부분이 유효한 JSON 시작인지 확인
+            if not candidate.startswith("{"):
+                candidate = "{" + candidate
+            try:
+                result = json.loads(candidate)
+                if isinstance(result, dict) and key in result:
+                    return result
+            except json.JSONDecodeError:
+                pass
+        return None
 
     def _log(
         self,
