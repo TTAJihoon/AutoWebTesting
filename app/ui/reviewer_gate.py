@@ -10,6 +10,12 @@ from PySide6.QtWidgets import (
 )
 
 _STATUS_OPTIONS = ["pending", "approved", "edited", "rejected"]
+_STATUS_KO = {
+    "pending":  "보류",
+    "approved": "승인",
+    "edited":   "수정",
+    "rejected": "거부",
+}
 _STATUS_COLORS = {
     "approved": QColor("#d1fae5"),
     "edited": QColor("#dbeafe"),
@@ -31,12 +37,12 @@ class ReviewerGate(QDialog):
         self._tcs = tcs
         self._reviewer_id = reviewer_id
         self._decisions: dict[str, dict] = {
-            tc["tc_id"]: {
+            tc.get("tc_id", f"__unknown_{i}__"): {
                 "status": tc.get("review_status", "pending"),
                 "note": tc.get("reviewer_note", ""),
                 "reviewer_id": reviewer_id,
             }
-            for tc in tcs
+            for i, tc in enumerate(tcs)
         }
         self._build_ui()
         self._load_tcs()
@@ -129,16 +135,17 @@ class ReviewerGate(QDialog):
     # ── 데이터 로딩 ──────────────────────────────────────────────────────
     def _load_tcs(self) -> None:
         self._table.setRowCount(0)
-        for tc in self._tcs:
+        for i, tc in enumerate(self._tcs):
             r = self._table.rowCount()
             self._table.insertRow(r)
-            status = self._decisions[tc["tc_id"]]["status"]
+            tc_id = tc.get("tc_id", f"__unknown_{i}__")
+            status = self._decisions.get(tc_id, {}).get("status", "pending")
             items = [
-                QTableWidgetItem(tc.get("tc_id", "")),
+                QTableWidgetItem(tc_id),
                 QTableWidgetItem(tc.get("대분류", "")),
                 QTableWidgetItem(tc.get("scenario", "")[:60]),
                 QTableWidgetItem(tc.get("design_technique", "")),
-                QTableWidgetItem(status),
+                QTableWidgetItem(_STATUS_KO.get(status, status)),
             ]
             bg = _STATUS_COLORS.get(status, QColor("white"))
             for item in items:
@@ -151,8 +158,8 @@ class ReviewerGate(QDialog):
         if row < 0 or row >= len(self._tcs):
             return
         tc = self._tcs[row]
-        tc_id = tc["tc_id"]
-        dec = self._decisions[tc_id]
+        tc_id = tc.get("tc_id", f"__unknown_{row}__")
+        dec = self._decisions.get(tc_id, {"status": "pending", "note": ""})
 
         detail_lines = [
             f"TC ID: {tc.get('tc_id')}",
@@ -179,30 +186,32 @@ class ReviewerGate(QDialog):
         row = self._table.currentRow()
         if row < 0:
             return
-        tc_id = self._tcs[row]["tc_id"]
-        self._decisions[tc_id]["status"] = value
+        tc_id = self._tcs[row].get("tc_id", f"__unknown_{row}__")
+        if tc_id in self._decisions:
+            self._decisions[tc_id]["status"] = value
 
     def _on_note_changed(self) -> None:
         row = self._table.currentRow()
         if row < 0:
             return
-        tc_id = self._tcs[row]["tc_id"]
-        self._decisions[tc_id]["note"] = self._note_edit.toPlainText()
+        tc_id = self._tcs[row].get("tc_id", f"__unknown_{row}__")
+        if tc_id in self._decisions:
+            self._decisions[tc_id]["note"] = self._note_edit.toPlainText()
 
     def _apply_current(self) -> None:
         row = self._table.currentRow()
         if row < 0:
             return
         tc = self._tcs[row]
-        tc_id = tc["tc_id"]
-        dec = self._decisions[tc_id]
+        tc_id = tc.get("tc_id", f"__unknown_{row}__")
+        dec = self._decisions.get(tc_id, {"status": "pending"})
         status = dec["status"]
         bg = _STATUS_COLORS.get(status, QColor("white"))
         for col in range(self._table.columnCount()):
             item = self._table.item(row, col)
             if item:
                 item.setBackground(bg)
-        self._table.item(row, 4).setText(status)
+        self._table.item(row, 4).setText(_STATUS_KO.get(status, status))
         self._update_summary()
 
     def _set_all(self, status: str) -> None:
@@ -214,7 +223,7 @@ class ReviewerGate(QDialog):
                 item = self._table.item(r, c)
                 if item:
                     item.setBackground(bg)
-            self._table.item(r, 4).setText(status)
+            self._table.item(r, 4).setText(_STATUS_KO.get(status, status))
         self._update_summary()
 
     def _update_summary(self) -> None:

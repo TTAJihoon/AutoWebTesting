@@ -79,9 +79,18 @@ def main() -> None:
         _pipeline_views.append(pv)
 
         def _open_gate(tcs: list[dict]) -> None:
-            gate = ReviewerGate(tcs=tcs, reviewer_id=username, parent=pv)
-            gate.decisions_ready.connect(pv.apply_gate)
-            gate.exec()
+            try:
+                gate = ReviewerGate(tcs=tcs, reviewer_id=username, parent=pv)
+                gate.decisions_ready.connect(pv.apply_gate)
+                gate.raise_()
+                gate.activateWindow()
+                gate.exec()
+            except Exception:
+                import traceback
+                QMessageBox.critical(
+                    pv, "Stage 4 오류",
+                    traceback.format_exc()[:1200],
+                )
 
         pv.gate_review_requested.connect(_open_gate)
         pv.show()

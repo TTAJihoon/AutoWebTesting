@@ -28,6 +28,22 @@ _TECHNIQUE_KO: dict[str, str] = {
     "cross_feature":    "기능 간 연계",
 }
 
+# 상태(review_status) 한글 변환
+_STATUS_KO: dict[str, str] = {
+    "pending":  "보류",
+    "approved": "승인",
+    "edited":   "수정",
+    "rejected": "거부",
+}
+
+# 실행 결과(result) 한글 변환
+_RESULT_KO: dict[str, str] = {
+    "not_executed": "미실행",
+    "pass":         "통과",
+    "fail":         "실패",
+    "blocked":      "차단",
+}
+
 
 class _PreGateWorker(QThread):
     """Stage 0~3 백그라운드 실행."""
@@ -306,14 +322,17 @@ class PipelineView(QMainWindow):
             bg       = status_colors.get(status, QColor("white"))
             res_bg   = result_colors.get(result, QColor("white"))
 
+            status_ko = _STATUS_KO.get(status, status)
+            result_ko = _RESULT_KO.get(result, result)
+
             cells = [
                 (0, tc.get("tc_id", ""),                   bg),
                 (1, tc.get("scenario", ""),                bg),
                 (2, tc.get("precondition", "")[:80],       bg),
                 (3, tc.get("expected", "")[:80],           bg),
                 (4, technique_ko,                          bg),
-                (5, status,                                bg),
-                (6, result,                                res_bg),
+                (5, status_ko,                             bg),
+                (6, result_ko,                             res_bg),
             ]
             for col, text, color in cells:
                 item = QTableWidgetItem(text)
