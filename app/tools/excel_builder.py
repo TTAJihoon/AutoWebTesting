@@ -97,13 +97,15 @@ def build_review(tcs: list[dict], output_path: str | Path) -> Path:
     ws.title = "TC 검토"
     _write_sheet(ws, review_cols, tcs, confidence_col="gen_confidence")
 
-    # 드롭다운 (review_status 컬럼)
-    from openpyxl.worksheet.datavalidation import DataValidation
-    status_col_idx = review_cols.index("review_status") + 1
-    status_col_letter = get_column_letter(status_col_idx)
-    dv = DataValidation(type="list", formula1='"approved,edited,rejected,pending"', allow_blank=False)
-    ws.add_data_validation(dv)
-    dv.sqref = f"{status_col_letter}2:{status_col_letter}{len(tcs)+1}"
+    # 드롭다운 (review_status 컬럼) — TC가 1개 이상일 때만 설정
+    # len(tcs)==0 이면 sqref="K2:K1" → min_row>max_row → openpyxl ValueError
+    if tcs:
+        from openpyxl.worksheet.datavalidation import DataValidation
+        status_col_idx = review_cols.index("review_status") + 1
+        status_col_letter = get_column_letter(status_col_idx)
+        dv = DataValidation(type="list", formula1='"approved,edited,rejected,pending"', allow_blank=False)
+        ws.add_data_validation(dv)
+        dv.sqref = f"{status_col_letter}2:{status_col_letter}{len(tcs) + 1}"
 
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)

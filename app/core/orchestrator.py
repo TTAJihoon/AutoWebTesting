@@ -97,9 +97,23 @@ class Orchestrator:
         self._stage = 2
         return self.tcs
 
+    # ── Stage 2 이후 TC 수 검사 ──────────────────────────────────────────
+    def _assert_tcs_not_empty(self, stage_name: str) -> None:
+        """TC 목록이 비어있으면 명확한 메시지로 중단."""
+        if not self.tcs:
+            raise RuntimeError(
+                f"{stage_name}: TC가 0개입니다.\n"
+                "가능한 원인:\n"
+                "  1) 대상 URL에 접근 실패 (Stage 0 DOM 스캔 결과 없음)\n"
+                "  2) 매뉴얼 파일 없음 + DOM 기능도 0개 추출\n"
+                "  3) LLM API 오류 또는 응답 파싱 실패\n"
+                "로그에서 Stage 0~2 오류를 확인하세요."
+            )
+
     # ── Stage 3 ──────────────────────────────────────────────────────────
     def run_stage3(self) -> list[dict]:
         self._cb("▶ Stage 3: V1~V5 검증")
+        self._assert_tcs_not_empty("Stage 3")
         self.tcs = stage3_verify.verify(
             tcs=self.tcs,
             manual_text=self.ingest_result["manual_text"],
@@ -109,8 +123,9 @@ class Orchestrator:
             progress_cb=self._cb,
         )
         self._save_intermediate("tc_verified")
-        # Reviewer Gate용 Excel 생성
-        build_review(self.tcs, self.run_dir / "tc_review.xlsx")
+        # Reviewer Gate용 Excel 생성 (TC 있을 때만)
+        if self.tcs:
+            build_review(self.tcs, self.run_dir / "tc_review.xlsx")
         self._stage = 3
         return self.tcs
 
