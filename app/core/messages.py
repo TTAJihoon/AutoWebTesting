@@ -161,5 +161,6 @@ def humanize(msg: str) -> str | None:
                 return None
             # m.expand()로 역참조(\1, \2...)만 치환한 교체 문자열 반환
             # re.sub()와 달리 원본에서 미매칭 부분이 남지 않음
-            return m.expand(replacement).strip()
+            # rstrip()만 사용: 교체 문자열의 앞쪽 들여쓰기 공백을 보존
+            return m.expand(replacement).rstrip()
     return stripped
