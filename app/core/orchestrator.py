@@ -41,13 +41,19 @@ class Orchestrator:
         # _safe_cb 위에서 이미 설정됨
         self.run_dir = RUNS_DIR / config.run_id
         self.run_dir.mkdir(parents=True, exist_ok=True)
-        # progress_cb를 CP949 안전 래퍼로 감쌈 (콘솔 출력 / Qt 모두 호환)
+        # progress_cb를 CP949 안전 + 사용자 친화적 메시지 변환 래퍼로 감쌈
+        from app.core.messages import humanize
+
         def _safe_cb(msg: str) -> None:
+            friendly = humanize(msg)
+            if friendly is None:          # 내부 디버그 메시지 — 화면 표시 안 함
+                return
             try:
-                (progress_cb or (lambda m: None))(msg)
+                (progress_cb or (lambda m: None))(friendly)
             except UnicodeEncodeError:
-                safe = msg.encode("ascii", errors="replace").decode("ascii")
+                safe = friendly.encode("ascii", errors="replace").decode("ascii")
                 (progress_cb or (lambda m: None))(safe)
+
         self._cb = _safe_cb
         self.llm = LLMClient(
             api_key=config.api_key,
