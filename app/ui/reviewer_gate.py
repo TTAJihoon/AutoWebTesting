@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 
 _STATUS_OPTIONS = ["pending", "approved", "edited", "rejected"]
 _STATUS_KO = {
-    "pending":  "보류",
+    "pending":  "검토 전",
     "approved": "승인",
     "edited":   "수정",
     "rejected": "거부",
