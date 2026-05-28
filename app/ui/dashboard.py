@@ -1,6 +1,7 @@
 """대시보드 창 — 실행 이력·사용자 관리·설정 (D45: PySide6)."""
 from __future__ import annotations
 import json
+import shutil
 from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
@@ -166,6 +167,23 @@ class Dashboard(QMainWindow):
         top.addWidget(refresh_btn)
         top.addSpacing(8)
 
+        # admin 전용: 이력 삭제 버튼
+        if self._role == "admin":
+            self._del_run_btn = QPushButton("🗑  이력 삭제")
+            self._del_run_btn.setFixedHeight(34)
+            self._del_run_btn.setStyleSheet(
+                "QPushButton { background: #ffffff; color: #ef4444;"
+                " border-radius: 6px; padding: 0 14px; font-size: 13px;"
+                " font-weight: 600; border: 1px solid #fca5a5; }"
+                "QPushButton:hover { background: #fee2e2; }"
+                "QPushButton:disabled { color: #cbd5e1; border-color: #e2e8f0; }"
+            )
+            self._del_run_btn.setEnabled(False)
+            self._del_run_btn.setToolTip("선택한 실행 이력과 모든 관련 파일을 영구 삭제합니다")
+            self._del_run_btn.clicked.connect(self._delete_run)
+            top.addWidget(self._del_run_btn)
+            top.addSpacing(8)
+
         self._new_btn = QPushButton("＋  새 실행")
         self._new_btn.setFixedHeight(34)
         self._new_btn.setStyleSheet(
@@ -187,6 +205,9 @@ class Dashboard(QMainWindow):
         self._runs_table.doubleClicked.connect(self._open_run)
         self._runs_table.setContextMenuPolicy(Qt.CustomContextMenu)
         self._runs_table.customContextMenuRequested.connect(self._on_runs_context_menu)
+        # admin: 행 선택 시 삭제 버튼 활성화
+        if self._role == "admin":
+            self._runs_table.itemSelectionChanged.connect(self._on_run_selection_changed)
         self._runs_table.setStyleSheet(
             "QTableWidget { border: none; background: #ffffff; }"
             "QHeaderView::section { background-color: #f8fafc; color: #64748b;"
@@ -383,8 +404,15 @@ class Dashboard(QMainWindow):
         run_id = self._runs_table.item(row, 0).text()
         self.open_run_requested.emit(run_id)
 
+    def _on_run_selection_changed(self) -> None:
+        """행 선택 변경 시 삭제 버튼 활성화/비활성화 (admin 전용)."""
+        has_selection = len(self._runs_table.selectedRows()) > 0 \
+            if hasattr(self._runs_table, "selectedRows") \
+            else self._runs_table.currentRow() >= 0
+        self._del_run_btn.setEnabled(has_selection)
+
     def _on_runs_context_menu(self, pos) -> None:
-        """우클릭 컨텍스트 메뉴 — 복제."""
+        """우클릭 컨텍스트 메뉴 — 복제 / admin이면 삭제도."""
         row = self._runs_table.rowAt(pos.y())
         if row < 0:
             return
@@ -396,11 +424,59 @@ class Dashboard(QMainWindow):
         clone_action = menu.addAction("복제")
         clone_action.setEnabled(has_url)
 
+        delete_action = None
+        if self._role == "admin":
+            menu.addSeparator()
+            delete_action = menu.addAction("🗑  이력 삭제")
+
         action = menu.exec(self._runs_table.viewport().mapToGlobal(pos))
         if action == clone_action and has_url:
             QApplication.clipboard().setText(url)
             self.clone_run_requested.emit(url)
             self.statusBar().showMessage(f"URL 복사됨: {url}", 3000)
+        elif action is not None and action == delete_action:
+            # 우클릭한 행을 선택 후 삭제
+            self._runs_table.selectRow(row)
+            self._delete_run()
+
+    def _delete_run(self) -> None:
+        """선택된 실행 이력을 영구 삭제 (admin 전용)."""
+        if self._role != "admin":
+            return
+        row = self._runs_table.currentRow()
+        if row < 0:
+            QMessageBox.information(self, "알림", "삭제할 이력을 선택하세요.")
+            return
+
+        run_id = self._runs_table.item(row, 0).text()
+        url = self._runs_table.item(row, 1).text() if self._runs_table.item(row, 1) else "-"
+        tc_count = self._runs_table.item(row, 2).text() if self._runs_table.item(row, 2) else "?"
+
+        confirmed = QMessageBox.warning(
+            self,
+            "실행 이력 삭제",
+            f"아래 이력과 관련 파일(스크린샷, TC 파일, LLM 로그 등)을 모두 영구 삭제합니다.\n\n"
+            f"  Run ID : {run_id}\n"
+            f"  URL    : {url}\n"
+            f"  TC 수  : {tc_count}\n\n"
+            "이 작업은 되돌릴 수 없습니다. 계속하시겠습니까?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,         # 기본값: No (실수 방지)
+        )
+        if confirmed != QMessageBox.Yes:
+            return
+
+        run_dir = RUNS_DIR / run_id
+        try:
+            if run_dir.exists():
+                shutil.rmtree(run_dir)
+            self._load_runs()
+            self.statusBar().showMessage(f"'{run_id}' 삭제 완료", 4000)
+        except Exception as e:
+            QMessageBox.critical(
+                self, "삭제 실패",
+                f"'{run_id}' 삭제 중 오류가 발생했습니다:\n{e}"
+            )
 
     # ── 설정 액션 ────────────────────────────────────────────────────────
     def _save_api_key(self) -> None:
