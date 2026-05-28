@@ -1,7 +1,7 @@
 """새 실행 마법사 (Step 1: URL·파일, Step 2: Auth, Step 3: 옵션) (D45: PySide6)."""
 from __future__ import annotations
 from pathlib import Path
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QUrl
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QFileDialog, QListWidget, QListWidgetItem,
@@ -10,9 +10,206 @@ from PySide6.QtWidgets import (
     QMessageBox, QGroupBox, QComboBox,
 )
 
+try:
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+    from PySide6.QtWebEngineCore import QWebEnginePage
+    _HAS_WEBENGINE = True
+except ImportError:
+    _HAS_WEBENGINE = False
+
 from app.config.settings import get_active_provider
 from app.core.orchestrator import RunConfig
 
+
+# ── JS 셀렉터 피커 (페이지 로드 후 주입) ──────────────────────────────────────
+_PICKER_JS = r"""
+(function() {
+    if (window.__AWT_PICKER_ACTIVE__) return;
+    window.__AWT_PICKER_ACTIVE__ = true;
+
+    var _hl = null, _done = false;
+
+    function _setHover(el, on) {
+        if (on) {
+            el.__awt_orig_outline = el.style.outline;
+            el.__awt_orig_cursor  = el.style.cursor;
+            el.style.outline = '3px solid #0066cc';
+            el.style.cursor  = 'crosshair';
+        } else {
+            el.style.outline = el.__awt_orig_outline || '';
+            el.style.cursor  = el.__awt_orig_cursor  || '';
+        }
+    }
+
+    /* CSS 선택자 생성 (우선순위: id → name → placeholder → type → 경로) */
+    function getSelector(el) {
+        if (el.id) return '#' + el.id;
+        var n = el.getAttribute('name');
+        if (n) return '[name="' + n.replace(/\\/g,'\\\\').replace(/"/g,'\\"') + '"]';
+        var ph = el.getAttribute('placeholder');
+        if (ph) return '[placeholder="' + ph.replace(/\\/g,'\\\\').replace(/"/g,'\\"').slice(0,50) + '"]';
+        var t = el.getAttribute('type');
+        if (t && t !== 'text') return el.tagName.toLowerCase() + '[type="' + t + '"]';
+        /* 경로 기반 */
+        var path = [], cur = el;
+        while (cur && cur !== document.body && cur.tagName) {
+            var tag = cur.tagName.toLowerCase();
+            var par = cur.parentElement;
+            if (par) {
+                var sibs = [].filter.call(par.children, function(c){ return c.tagName === cur.tagName; });
+                if (sibs.length > 1)
+                    path.unshift(tag + ':nth-of-type(' + ([].indexOf.call(sibs, cur) + 1) + ')');
+                else
+                    path.unshift(tag);
+            } else { path.unshift(tag); }
+            cur = par;
+        }
+        return path.join(' > ');
+    }
+
+    function getText(el) {
+        return (el.getAttribute('placeholder') || el.getAttribute('aria-label') ||
+                el.value || el.textContent || '').trim().slice(0, 60);
+    }
+
+    document.addEventListener('mouseover', function(e) {
+        if (_done) return;
+        if (_hl && _hl !== e.target) { _setHover(_hl, false); _hl = null; }
+        _hl = e.target;
+        _setHover(_hl, true);
+    }, true);
+
+    document.addEventListener('mouseout', function(e) {
+        if (_done || _hl !== e.target) return;
+        _setHover(_hl, false);
+        _hl = null;
+    }, true);
+
+    document.addEventListener('click', function(e) {
+        if (_done) return;
+        e.preventDefault();
+        e.stopPropagation();
+        _done = true;
+        var el = e.target;
+        if (_hl) { _setHover(_hl, false); el.style.outline = '3px solid #00aa44'; }
+        var sel = getSelector(el);
+        var txt = getText(el);
+
+        /* 확인 배너 */
+        var b = document.createElement('div');
+        b.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#00aa44;color:#fff;' +
+            'padding:10px 16px;font-size:13px;z-index:2147483647;font-family:sans-serif;';
+        b.textContent = '✅ 선택됨: ' + sel;
+        document.body.appendChild(b);
+
+        console.log('__AWT_SEL__:' + sel + '|||' + txt);
+    }, true);
+
+    /* 하단 안내 배너 */
+    var hint = document.createElement('div');
+    hint.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);' +
+        'background:rgba(0,102,204,0.92);color:#fff;padding:10px 24px;border-radius:24px;' +
+        'font-size:13px;z-index:2147483647;font-family:sans-serif;pointer-events:none;' +
+        'box-shadow:0 2px 10px rgba(0,0,0,0.3);';
+    hint.textContent = '🎯  원하는 요소를 클릭하세요';
+    document.body.appendChild(hint);
+})();
+"""
+
+# ── WebEngine 의존 클래스 (QtWebEngine 설치 시에만 정의) ───────────────────────
+if _HAS_WEBENGINE:
+
+    class _SelectorPage(QWebEnginePage):
+        """console.log 메시지를 가로채 CSS 선택자를 Python Signal로 전달."""
+
+        selector_captured = Signal(str, str)   # (selector, display_text)
+
+        def javaScriptConsoleMessage(
+            self, level, message: str, line: int, source: str
+        ) -> None:
+            if message.startswith("__AWT_SEL__:"):
+                payload = message[len("__AWT_SEL__:"):]
+                parts   = payload.split("|||", 1)
+                sel     = parts[0].strip()
+                txt     = parts[1].strip() if len(parts) > 1 else ""
+                self.selector_captured.emit(sel, txt)
+
+    class SelectorPickerDialog(QDialog):
+        """내장 브라우저로 URL을 열고, 사용자가 클릭한 요소의 CSS 선택자를 캡처."""
+
+        def __init__(self, url: str, parent=None):
+            super().__init__(parent)
+            self.setWindowTitle("요소 선택 — 원하는 입력란을 클릭하세요")
+            self.setMinimumSize(1100, 720)
+            self.resize(1200, 760)
+            self.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
+            self._selector: str = ""
+            self._build_ui(url)
+
+        def _build_ui(self, url: str) -> None:
+            lay = QVBoxLayout(self)
+            lay.setSpacing(8)
+
+            # 안내
+            hint_lbl = QLabel(
+                "🎯  원하는 입력 칸 위에 마우스를 올리면 파란 테두리가 표시됩니다. "
+                "클릭하면 선택자가 자동으로 입력됩니다."
+            )
+            hint_lbl.setWordWrap(True)
+            hint_lbl.setStyleSheet(
+                "background:#e8f4fd; color:#0066cc; padding:8px; "
+                "border-radius:4px; font-size:12px;"
+            )
+            lay.addWidget(hint_lbl)
+
+            # 선택된 선택자 표시줄
+            sel_row = QHBoxLayout()
+            sel_row.addWidget(QLabel("선택된 선택자:"))
+            self._sel_edit = QLineEdit()
+            self._sel_edit.setReadOnly(True)
+            self._sel_edit.setPlaceholderText("아직 선택되지 않음")
+            sel_row.addWidget(self._sel_edit, 1)
+            lay.addLayout(sel_row)
+
+            # 내장 브라우저
+            self._page = _SelectorPage()
+            self._page.selector_captured.connect(self._on_selector)
+            self._view = QWebEngineView()
+            self._view.setPage(self._page)
+            self._view.loadFinished.connect(self._on_load_finished)
+            self._view.load(QUrl(url))
+            lay.addWidget(self._view, 1)
+
+            # 버튼
+            btn_row = QHBoxLayout()
+            cancel_btn = QPushButton("취소")
+            cancel_btn.clicked.connect(self.reject)
+            self._ok_btn = QPushButton("✅  이 선택자로 사용")
+            self._ok_btn.setEnabled(False)
+            self._ok_btn.clicked.connect(self.accept)
+            btn_row.addStretch()
+            btn_row.addWidget(cancel_btn)
+            btn_row.addWidget(self._ok_btn)
+            lay.addLayout(btn_row)
+
+        def _on_load_finished(self, ok: bool) -> None:
+            if ok:
+                self._view.page().runJavaScript(_PICKER_JS)
+
+        def _on_selector(self, selector: str, text: str) -> None:
+            self._selector = selector
+            display = f"{selector}  ← {text}" if text else selector
+            self._sel_edit.setText(display)
+            self._sel_edit.setStyleSheet(
+                "background:#e8ffe8; color:#006600; font-family: monospace;"
+            )
+            self._ok_btn.setEnabled(True)
+
+        def selected_selector(self) -> str:
+            return self._selector
+
+
+# ── 모델 목록 ─────────────────────────────────────────────────────────────────
 _MODELS: dict[str, list[tuple[str, str]]] = {
     "google": [
         # ── 무료 티어 있음 ──────────────────────────────────────────────
@@ -49,7 +246,7 @@ class RunWizard(QDialog):
     def __init__(self, api_key: str, prefill_url: str = "", parent=None):
         super().__init__(parent)
         self.setWindowTitle("새 실행 — 설정 마법사")
-        self.setFixedSize(620, 480)
+        self.setFixedSize(680, 520)
         self.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
         self._api_key = api_key
         self._auth_rows: list[dict] = []
@@ -131,17 +328,52 @@ class RunWizard(QDialog):
         """인증 시퀀스 설정."""
         w = QWidget()
         lay = QVBoxLayout(w)
-        lay.setSpacing(12)
+        lay.setSpacing(10)
 
         lay.addWidget(QLabel("<b>Step 2: 인증 시퀀스 (선택)</b>"))
-        lay.addWidget(QLabel(
-            "로그인이 필요한 경우 아래에 단계를 추가하세요.\n"
-            "action: goto | fill | click  /  selector: CSS 선택자  /  value: 입력값 (fill만)"
-        ))
 
-        self._auth_table = QTableWidget(0, 3)
-        self._auth_table.setHorizontalHeaderLabels(["action", "selector", "value"])
-        self._auth_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        # 액션 설명
+        desc_lbl = QLabel(
+            "로그인이 필요한 경우 아래에 단계를 추가하세요.\n"
+            "  • goto — URL 이동    • fill — 값 입력    • click — 요소 클릭"
+        )
+        desc_lbl.setStyleSheet("color:#555; font-size:11px;")
+        lay.addWidget(desc_lbl)
+
+        # 셀렉터 피커 안내 (WebEngine 설치 시)
+        if _HAS_WEBENGINE:
+            picker_hint = QLabel(
+                "🎯  selector 칸 오른쪽의 버튼을 누르면 브라우저 팝업이 열려 "
+                "요소를 클릭하는 것만으로 선택자를 자동 입력할 수 있습니다."
+            )
+            picker_hint.setWordWrap(True)
+            picker_hint.setStyleSheet(
+                "background:#e8f4fd; color:#0055aa; padding:6px 8px; "
+                "border-radius:4px; font-size:11px;"
+            )
+            lay.addWidget(picker_hint)
+
+        # 인증 테이블 (4열: action | selector/URL | value | 🎯)
+        self._auth_table = QTableWidget(0, 4)
+        self._auth_table.setHorizontalHeaderLabels(
+            ["action", "selector / URL", "값 (fill 전용)", ""]
+        )
+        # ① 너비를 먼저 지정한 뒤 ② Fixed 모드로 고정 (순서 중요)
+        self._auth_table.setColumnWidth(0, 80)
+        self._auth_table.setColumnWidth(2, 150)
+        self._auth_table.setColumnWidth(3, 40)
+        hh = self._auth_table.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.Fixed)
+        hh.setSectionResizeMode(1, QHeaderView.Stretch)
+        hh.setSectionResizeMode(2, QHeaderView.Fixed)
+        hh.setSectionResizeMode(3, QHeaderView.Fixed)
+        # resizeSection 으로 한 번 더 강제 (Fixed 고정 후에도 적용됨)
+        hh.resizeSection(0, 80)
+        hh.resizeSection(2, 150)
+        hh.resizeSection(3, 40)
+        vh = self._auth_table.verticalHeader()
+        vh.setVisible(False)
+        vh.setDefaultSectionSize(28)   # 행 높이 고정 → 콤보박스 레이아웃 안정화
         lay.addWidget(self._auth_table)
 
         row_btns = QHBoxLayout()
@@ -257,16 +489,26 @@ class RunWizard(QDialog):
     def _collect_auth(self) -> None:
         self._auth_rows = []
         for r in range(self._auth_table.rowCount()):
-            action = (self._auth_table.item(r, 0) or QTableWidgetItem("")).text().strip()
+            # action: QComboBox 위젯에서 읽기 (없으면 아이템 텍스트 폴백)
+            combo = self._auth_table.cellWidget(r, 0)
+            if combo is not None:
+                action = combo.currentText().strip()
+            else:
+                action = (self._auth_table.item(r, 0) or QTableWidgetItem("")).text().strip()
+
             selector = (self._auth_table.item(r, 1) or QTableWidgetItem("")).text().strip()
-            value = (self._auth_table.item(r, 2) or QTableWidgetItem("")).text().strip()
-            if action:
-                entry: dict = {"action": action, "selector": selector}
-                if action == "fill":
-                    entry["value"] = value
-                elif action == "goto":
-                    entry["url"] = selector
-                self._auth_rows.append(entry)
+            value    = (self._auth_table.item(r, 2) or QTableWidgetItem("")).text().strip()
+
+            # selector/URL이 비어 있는 행은 완성되지 않은 행으로 간주해 건너뜀
+            if not action or not selector:
+                continue
+
+            entry: dict = {"action": action, "selector": selector}
+            if action == "fill":
+                entry["value"] = value
+            elif action == "goto":
+                entry["url"] = selector
+            self._auth_rows.append(entry)
 
     def _finish(self) -> None:
         model_override = self._model_combo.currentData()
@@ -304,8 +546,87 @@ class RunWizard(QDialog):
     def _add_auth_row(self) -> None:
         r = self._auth_table.rowCount()
         self._auth_table.insertRow(r)
-        self._auth_table.setItem(r, 0, QTableWidgetItem("fill"))
+        self._auth_table.setRowHeight(r, 28)   # 콤보박스 높이에 맞춰 행 고정
+
+        # 열 0: action QComboBox
+        combo = QComboBox()
+        combo.addItems(["fill", "click", "goto"])
+        combo.currentTextChanged.connect(self._on_action_changed)
+        self._auth_table.setCellWidget(r, 0, combo)
+
+        # 열 3: 🎯 선택자 피커 버튼 (WebEngine 있을 때만)
+        if _HAS_WEBENGINE:
+            btn = QPushButton("🎯")
+            btn.setFixedSize(36, 24)   # 너비·높이 모두 고정
+            btn.setToolTip(
+                "URL을 팝업 브라우저로 열어 요소를 클릭하면 선택자가 자동 입력됩니다."
+            )
+            btn.clicked.connect(self._on_picker_btn_clicked)
+            self._auth_table.setCellWidget(r, 3, btn)
 
     def _del_auth_row(self) -> None:
-        for item in self._auth_table.selectedItems():
-            self._auth_table.removeRow(item.row())
+        """선택된 모든 행 삭제 (인덱스 역순으로 제거해 시프트 방지)."""
+        rows = sorted(
+            {idx.row() for idx in self._auth_table.selectedIndexes()},
+            reverse=True,
+        )
+        for row in rows:
+            self._auth_table.removeRow(row)
+
+    # ── 액션 변경 시 피커 버튼 활성/비활성 ──────────────────────────────────
+    def _on_action_changed(self, action: str) -> None:
+        """goto 행에서는 피커 버튼 비활성화 (URL 입력이므로 선택자 불필요)."""
+        combo = self.sender()
+        for r in range(self._auth_table.rowCount()):
+            if self._auth_table.cellWidget(r, 0) is combo:
+                btn = self._auth_table.cellWidget(r, 3)
+                if btn is not None:
+                    btn.setEnabled(action != "goto")
+                break
+
+    # ── 피커 버튼 클릭 → 어느 행인지 찾아 피커 호출 ───────────────────────
+    def _on_picker_btn_clicked(self) -> None:
+        btn = self.sender()
+        for r in range(self._auth_table.rowCount()):
+            if self._auth_table.cellWidget(r, 3) is btn:
+                self._open_selector_picker(r)
+                break
+
+    def _open_selector_picker(self, row: int) -> None:
+        """해당 행 위에서 가장 가까운 goto URL(또는 Step 1 URL)로 팝업 브라우저 오픈."""
+        if not _HAS_WEBENGINE:
+            QMessageBox.information(
+                self, "기능 없음",
+                "PySide6-WebEngine이 설치되어 있지 않습니다.\n"
+                "pip install PySide6-WebEngine 후 재시작하세요."
+            )
+            return
+
+        # 이 행 위쪽 goto 행에서 URL 찾기
+        url = ""
+        for r in range(row - 1, -1, -1):
+            combo = self._auth_table.cellWidget(r, 0)
+            if combo and combo.currentText() == "goto":
+                item = self._auth_table.item(r, 1)
+                if item:
+                    url = item.text().strip()
+                if url:
+                    break
+
+        # goto URL 없으면 Step 1 URL 사용
+        if not url:
+            url = self._url_edit.text().strip()
+
+        if not url.startswith(("http://", "https://")):
+            QMessageBox.warning(
+                self, "URL 없음",
+                "이 행 위에 'goto' 행을 추가하고 URL을 입력하거나,\n"
+                "Step 1에서 대상 URL을 먼저 입력하세요."
+            )
+            return
+
+        dlg = SelectorPickerDialog(url, parent=self)
+        if dlg.exec() == QDialog.Accepted:
+            sel = dlg.selected_selector()
+            if sel:
+                self._auth_table.setItem(row, 1, QTableWidgetItem(sel))
