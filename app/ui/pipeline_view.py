@@ -148,7 +148,8 @@ class PipelineView(QMainWindow):
     """파이프라인 실행 창."""
 
     gate_review_requested = Signal(list)
-    _log_signal = Signal(str)
+    _log_signal     = Signal(str)
+    _raw_log_signal = Signal(str)   # 상세 로그(humanize 전 원본)
 
     @property
     def config(self) -> RunConfig:
@@ -160,13 +161,18 @@ class PipelineView(QMainWindow):
         self.setWindowTitle(f"AWT 실행 — {config.run_id}")
         self.resize(1120, 720)
         self._config      = config
-        self._orch        = Orchestrator(config, progress_cb=self._log_signal.emit)
+        self._orch        = Orchestrator(
+            config,
+            progress_cb=self._log_signal.emit,
+            raw_progress_cb=self._raw_log_signal.emit,
+        )
         self._pre_worker:  _PreGateWorker | None = None
         self._post_worker: _PostGateWorker | None = None
         self._tcs: list[dict] = []
 
         self._build_ui()
         self._log_signal.connect(self._append_log)
+        self._raw_log_signal.connect(self._append_raw_log)
         self._write_meta("started")
 
     # ── UI 구성 ───────────────────────────────────────────────────────────────
@@ -251,13 +257,36 @@ class PipelineView(QMainWindow):
         log_lay.setContentsMargins(12, 12, 12, 12)
         log_lay.setSpacing(6)
 
+        # 로그 헤더 + 상세 로그 토글 버튼
+        log_hdr_row = QHBoxLayout()
+        log_hdr_row.setContentsMargins(0, 0, 0, 0)
         log_hdr = QLabel("실행 로그")
         log_hdr.setStyleSheet(
             "QLabel { background: transparent; border: none;"
             " font-size: 15px; font-weight: 700; color: #1e293b;"
             " padding-bottom: 6px; border-bottom: 1px solid #f1f5f9; }"
         )
-        log_lay.addWidget(log_hdr)
+        log_hdr_row.addWidget(log_hdr)
+        log_hdr_row.addStretch()
+
+        self._toggle_raw_btn = QPushButton("📋  상세 로그")
+        self._toggle_raw_btn.setCheckable(True)
+        self._toggle_raw_btn.setFixedHeight(24)
+        self._toggle_raw_btn.setStyleSheet(
+            "QPushButton {"
+            " background: #ffffff; color: #475569;"
+            " border: 1px solid #cbd5e1; border-radius: 4px;"
+            " padding: 0 10px; font-size: 11px; min-height: 0px; }"
+            "QPushButton:hover { background: #f1f5f9; }"
+            "QPushButton:checked {"
+            " background: #eff6ff; color: #1d4ed8; border-color: #93c5fd; }"
+        )
+        self._toggle_raw_btn.setToolTip(
+            "원본(raw) 로그 표시 — humanize 단계 이전, 내부 디버그 메시지 포함"
+        )
+        self._toggle_raw_btn.toggled.connect(self._toggle_raw_log)
+        log_hdr_row.addWidget(self._toggle_raw_btn)
+        log_lay.addLayout(log_hdr_row)
 
         self._log = QPlainTextEdit()
         self._log.setReadOnly(True)
@@ -269,6 +298,20 @@ class PipelineView(QMainWindow):
             "}"
         )
         log_lay.addWidget(self._log)
+
+        # 상세(raw) 로그 패널 — 기본 숨김, 토글로 표시
+        self._raw_log = QPlainTextEdit()
+        self._raw_log.setReadOnly(True)
+        self._raw_log.setFont(QFont("Consolas", 8))
+        self._raw_log.setStyleSheet(
+            "QPlainTextEdit {"
+            " background-color: #0f172a; color: #cbd5e1;"
+            " border: none; border-radius: 4px; padding: 4px;"
+            " selection-background-color: #1e40af; }"
+        )
+        self._raw_log.setVisible(False)
+        log_lay.addWidget(self._raw_log)
+
         splitter.addWidget(log_card)
 
         # TC 테이블 패널 (우)
@@ -809,6 +852,23 @@ class PipelineView(QMainWindow):
         self._set_status("오류 발생")
         self._append_log(f"[오류]\n{msg}")
         QMessageBox.critical(self, "오류", msg[:800])
+
+    # ── 상세(raw) 로그 ───────────────────────────────────────────────────────
+    def _append_raw_log(self, msg: str) -> None:
+        """원본 로그 패널에 라인 추가. 상세 로그가 숨겨져 있어도 메모리에는 축적."""
+        ts   = datetime.now().strftime("%H:%M:%S.%f")[:-3]   # ms 단위
+        line = f"[{ts}] {msg}"
+        self._raw_log.appendPlainText(line)
+        sb = self._raw_log.verticalScrollBar()
+        sb.setValue(sb.maximum())
+
+    def _toggle_raw_log(self, checked: bool) -> None:
+        """상세 로그 패널 표시/숨김 토글."""
+        self._raw_log.setVisible(checked)
+        if checked:
+            # 토글한 순간 자동으로 최하단으로
+            sb = self._raw_log.verticalScrollBar()
+            sb.setValue(sb.maximum())
 
     # ── UI 갱신 ───────────────────────────────────────────────────────────────
     def _append_log(self, msg: str) -> None:

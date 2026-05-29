@@ -246,7 +246,7 @@ class RunWizard(QDialog):
     def __init__(self, api_key: str, prefill_url: str = "", parent=None):
         super().__init__(parent)
         self.setWindowTitle("새 실행 — 설정 마법사")
-        self.setFixedSize(680, 520)
+        self.setFixedSize(720, 700)
         self.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
         self._api_key = api_key
         self._auth_rows: list[dict] = []
@@ -473,6 +473,39 @@ class RunWizard(QDialog):
         l_lay.addWidget(leaves_hint)
         lay.addWidget(leaves_box)
 
+        # ── 자동 실행 표시 옵션 (헤드풀 모드) ────────────────────────────
+        exec_box = QGroupBox("자동 실행 옵션 (Stage 5)")
+        e_lay = QVBoxLayout(exec_box)
+        self._headless_cb = QCheckBox(
+            "테스트 실행 시 브라우저 표시 (별도 Chromium 창 — 동작을 직접 볼 수 있음)"
+        )
+        self._headless_cb.setChecked(False)   # 기본: 헤드리스(체크 안 됨)
+        e_lay.addWidget(self._headless_cb)
+
+        slow_row = QHBoxLayout()
+        slow_row.addWidget(QLabel("느린 모드:"))
+        self._slowmo_spin = QSpinBox()
+        self._slowmo_spin.setRange(0, 2000)
+        self._slowmo_spin.setSingleStep(50)
+        self._slowmo_spin.setValue(0)
+        self._slowmo_spin.setSuffix("  ms (액션 사이 지연)")
+        self._slowmo_spin.setFixedWidth(180)
+        self._slowmo_spin.setEnabled(False)
+        slow_row.addWidget(self._slowmo_spin)
+        slow_row.addStretch()
+        e_lay.addLayout(slow_row)
+        # 브라우저 표시 체크 시에만 slow mo 활성
+        self._headless_cb.toggled.connect(self._slowmo_spin.setEnabled)
+
+        headless_hint = QLabel(
+            "체크 해제(기본): 백그라운드 헤드리스 실행 — 빠름.\n"
+            "체크: 별도 Chromium 창에서 자동화 동작이 보임. 사용자 마우스/키보드와는 분리됨."
+        )
+        headless_hint.setWordWrap(True)
+        headless_hint.setStyleSheet("color:#888; font-size:11px;")
+        e_lay.addWidget(headless_hint)
+        lay.addWidget(exec_box)
+
         lay.addStretch()
         summary_lbl = QLabel("설정을 확인하고 '실행 시작'을 클릭하면 파이프라인이 시작됩니다.")
         summary_lbl.setWordWrap(True)
@@ -578,6 +611,8 @@ class RunWizard(QDialog):
             inferred_threshold=self._thresh_spin.value(),
             max_leaves=self._max_leaves_spin.value(),
             model_override=model_override,
+            headless_exec=not self._headless_cb.isChecked(),  # 체크 = 보이게 (headless=False)
+            slow_mo_ms=self._slowmo_spin.value() if self._headless_cb.isChecked() else 0,
         )
         self.run_config_ready.emit(config)
         self.accept()

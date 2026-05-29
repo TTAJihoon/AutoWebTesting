@@ -17,21 +17,34 @@ def execute(
     base_url: str,
     auth_sequence: list[dict] | None = None,
     progress_cb: Callable[[str], None] | None = None,
+    headless: bool = True,
+    slow_mo_ms: int = 0,
 ) -> list[dict]:
-    """approved/edited TC를 Playwright로 실행. result/actual/exec_confidence 채움."""
+    """approved/edited TC를 Playwright로 실행. result/actual/exec_confidence 채움.
+
+    Args:
+        headless: False면 별도 Chromium 창이 떠 사용자가 동작을 볼 수 있음.
+        slow_mo_ms: 액션 사이 인공 지연 (ms). 헤드풀 모드에서 동작을 천천히 보기 위함.
+    """
     def _cb(msg: str):
         if progress_cb:
             progress_cb(msg)
 
     runnable = [tc for tc in tcs if tc.get("review_status") in ("approved", "edited")]
-    _cb(f"Stage 5: {len(runnable)}개 TC 자동 실행 시작 (D40 고도화 엔진)")
+    mode_label = "헤드풀 (브라우저 표시)" if not headless else "헤드리스"
+    _cb(
+        f"Stage 5: {len(runnable)}개 TC 자동 실행 시작 (D40 고도화 엔진, {mode_label})"
+    )
 
     # gnuboard5 전용 엔진 사용 여부 판단
     # auth_sequence에서 admin_id/admin_pw 추출 시도
     admin_id, admin_pw = _extract_admin_creds(auth_sequence)
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        launch_kwargs: dict = {"headless": headless}
+        if slow_mo_ms > 0:
+            launch_kwargs["slow_mo"] = slow_mo_ms
+        browser = p.chromium.launch(**launch_kwargs)
         context = browser.new_context()
         page = context.new_page()
 

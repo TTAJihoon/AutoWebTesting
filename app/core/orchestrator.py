@@ -45,11 +45,28 @@ class RunConfig:
     max_pages: int = 30
     """BFS 최대 페이지 수 (selected_urls가 있으면 무시됨)."""
 
+    headless_exec: bool = True
+    """Stage 5 TC 실행 시 헤드리스 여부. False면 별도 Chromium 창이 떠
+    사용자가 자동화 동작을 볼 수 있음 (마우스/키보드는 자동화에만 반응)."""
+
+    slow_mo_ms: int = 0
+    """Stage 5에서 액션 사이 인공 지연(ms). 헤드풀 모드에서 천천히 보기 위함."""
+
 
 class Orchestrator:
     """AWT Stage 0~7 실행 제어."""
 
-    def __init__(self, config: RunConfig, progress_cb: Callable[[str], None] | None = None):
+    def __init__(
+        self,
+        config: RunConfig,
+        progress_cb: Callable[[str], None] | None = None,
+        raw_progress_cb: Callable[[str], None] | None = None,
+    ):
+        """
+        Args:
+            progress_cb:     사용자 친화 메시지(humanize 후). humanize=None인 메시지는 받지 않음.
+            raw_progress_cb: 원본(raw) 메시지 — humanize 전 단계. 상세 로그 패널용.
+        """
         self.config = config
         # _safe_cb 위에서 이미 설정됨
         self.run_dir = RUNS_DIR / config.run_id
@@ -58,8 +75,22 @@ class Orchestrator:
         from app.core.messages import humanize
 
         def _safe_cb(msg: str) -> None:
+            # 1) 상세 로그: 원본 메시지 그대로 전달 (필터링 없음)
+            if raw_progress_cb is not None:
+                try:
+                    raw_progress_cb(msg)
+                except UnicodeEncodeError:
+                    safe = msg.encode("ascii", errors="replace").decode("ascii")
+                    try:
+                        raw_progress_cb(safe)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+
+            # 2) 사용자 친화 로그: humanize 후 전달
             friendly = humanize(msg)
-            if friendly is None:          # 내부 디버그 메시지 — 화면 표시 안 함
+            if friendly is None:          # 내부 디버그 메시지 — 사용자 화면 표시 안 함
                 return
             try:
                 (progress_cb or (lambda m: None))(friendly)
@@ -175,6 +206,8 @@ class Orchestrator:
             base_url=self.config.target_url,
             auth_sequence=self.config.auth_sequence or None,
             progress_cb=self._cb,
+            headless=self.config.headless_exec,
+            slow_mo_ms=self.config.slow_mo_ms,
         )
         self._save_intermediate("tc_executed")
         self._stage = 5
