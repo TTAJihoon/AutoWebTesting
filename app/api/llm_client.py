@@ -146,13 +146,15 @@ class LLMClient:
                     "  3) max_leaves 값을 더 낮게 설정해 호출 횟수 줄이기"
                 ) from e
 
-            # 일시적 서버/속도 오류 — 최대 5회 재시도 (503·500·분당 429)
+            # 일시적 서버/속도 오류 — 최대 5회 재시도 (503·500·분당 429·빈 응답)
             # 500 INTERNAL: Gemini 서버 과부하 (일시적)
             # 503 UNAVAILABLE / 429 RESOURCE_EXHAUSTED: 분당 속도 제한
+            # [TRANSIENT]: gemini_provider가 명시한 일시 장애 (빈 응답 등)
             if _retry_count < 5 and any(
                 code in err_str for code in (
                     "500", "503", "429",
                     "INTERNAL", "UNAVAILABLE", "RESOURCE_EXHAUSTED",
+                    "[TRANSIENT]",
                 )
             ):
                 # API가 권장 대기 시간을 제공하면 그 값 사용; 없으면 지수 백오프

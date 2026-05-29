@@ -82,18 +82,29 @@ def design(
 
     # max_leaves 적용 (API 비용·무료 쿼터 보호)
     original_count = len(leaves)
-    leaves = _prioritize_leaves(leaves, max_leaves)
-    if max_leaves > 0 and original_count > max_leaves:
+
+    # ── 안전 가드 (C): max_leaves=0(무제한)인데 leaves가 너무 많으면 자동 제한 ──
+    SAFETY_CAP = 100
+    if max_leaves <= 0 and original_count > SAFETY_CAP:
+        leaves = _prioritize_leaves(leaves, SAFETY_CAP)
         _cb(
-            f"TC 설계 대상 leaf {original_count}개 → 상위 {len(leaves)}개로 제한 "
-            f"(max_leaves={max_leaves}; 해제하려면 설정에서 0으로 변경)"
+            f"⚠ leaf {original_count}개 → 안전 제한 {SAFETY_CAP}개 자동 적용 "
+            f"(max_leaves=0). 무제한 실행이 필요하면 max_leaves를 명시적 큰 값(예: 9999)으로 설정하세요."
         )
+    elif max_leaves > 0:
+        leaves = _prioritize_leaves(leaves, max_leaves)
+        if original_count > max_leaves:
+            _cb(
+                f"TC 설계 대상 leaf {original_count}개 → 상위 {len(leaves)}개로 제한 "
+                f"(max_leaves={max_leaves}; 해제하려면 설정에서 0으로 변경)"
+            )
 
     # 제품 유형 분류 (전체 매뉴얼 기준)
     product_type_ids = classify_product_types(manual_text)
     invariants = load_invariants_multi(product_type_ids)
 
     all_tcs: list[dict] = []
+    failed_leaves: list[tuple[int, str, str]] = []   # (idx, leaf명, 오류요약)
 
     for leaf_idx, leaf in enumerate(leaves, 1):
         leaf_num = f"{leaf_idx:03d}"
@@ -108,17 +119,34 @@ def design(
 
         _cb(f"TC 설계 중 ({leaf_idx}/{len(leaves)}): {leaf['category_leaf']}")
 
-        result = llm_client.call("TC_DESIGN", {
-            "category_major": leaf["category_major"],
-            "category_mid": leaf["category_mid"],
-            "category_leaf": leaf["category_leaf"],
-            "requirement_id": leaf["requirement_id"],
-            "tc_id_start": tc_id_start,
-            "manual_excerpt": excerpt[:1500],
-            "domain_invariants": invariants_text or "(없음)",
-            "similar_past_defects": defects_text or "(없음)",
-            "negative_categories": _format_negative_categories(leaf["category_leaf"]),
-        })
+        # ── (B) 단일 leaf 실패 허용 — 한 leaf가 실패해도 다음 leaf로 진행 ──
+        try:
+            result = llm_client.call("TC_DESIGN", {
+                "category_major": leaf["category_major"],
+                "category_mid": leaf["category_mid"],
+                "category_leaf": leaf["category_leaf"],
+                "requirement_id": leaf["requirement_id"],
+                "tc_id_start": tc_id_start,
+                "manual_excerpt": excerpt[:1500],
+                "domain_invariants": invariants_text or "(없음)",
+                "similar_past_defects": defects_text or "(없음)",
+                "negative_categories": _format_negative_categories(leaf["category_leaf"]),
+            })
+        except Exception as e:
+            err_msg = str(e).splitlines()[0][:200]
+            failed_leaves.append((leaf_idx, leaf["category_leaf"], err_msg))
+            _cb(
+                f"⚠ leaf 분석 실패 ({leaf_idx}/{len(leaves)}): "
+                f"{leaf['category_leaf']} — {err_msg}"
+            )
+            # 일일 쿼터 초과는 더 진행해도 의미 없음 — 즉시 종료(지금까지 모은 TC 보존)
+            if "일일 쿼터" in err_msg or "PerDay" in err_msg:
+                _cb(
+                    f"⚠ 일일 쿼터 초과로 Stage 2 조기 종료 — TC {len(all_tcs)}개 / "
+                    f"leaf {leaf_idx - 1}/{len(leaves)} 처리됨"
+                )
+                break
+            continue
 
         for tc_idx, tc in enumerate(result.get("tcs", []), 1):
             # 프롬프트 출력 필드 → 내부 스키마 필드 정규화
@@ -154,5 +182,11 @@ def design(
                 tc.setdefault("negative_category", None)
             all_tcs.append(tc)
 
-    _cb(f"Stage 2 완료 - TC {len(all_tcs)}개 생성")
+    if failed_leaves:
+        _cb(
+            f"Stage 2 완료 - TC {len(all_tcs)}개 생성 "
+            f"(분석 실패 leaf {len(failed_leaves)}개)"
+        )
+    else:
+        _cb(f"Stage 2 완료 - TC {len(all_tcs)}개 생성")
     return all_tcs

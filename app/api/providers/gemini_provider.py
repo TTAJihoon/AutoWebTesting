@@ -65,6 +65,58 @@ class GeminiProvider(LLMProvider):
         )
 
         text = response.text or ""
+
+        # ── 빈 응답 진단: finish_reason / safety_ratings / prompt_feedback ──
+        if not text.strip():
+            finish_reason = ""
+            block_reason  = ""
+            blocked_cats: list[str] = []
+            try:
+                if getattr(response, "candidates", None):
+                    cand = response.candidates[0]
+                    fr   = getattr(cand, "finish_reason", None)
+                    finish_reason = (str(fr.name) if hasattr(fr, "name") else str(fr or "")).upper()
+                    for r in (getattr(cand, "safety_ratings", None) or []):
+                        if getattr(r, "blocked", False):
+                            cat = getattr(r, "category", None)
+                            cat_s = cat.name if hasattr(cat, "name") else str(cat or "?")
+                            prob = getattr(r, "probability", None)
+                            prob_s = prob.name if hasattr(prob, "name") else str(prob or "?")
+                            blocked_cats.append(f"{cat_s}={prob_s}")
+                pf = getattr(response, "prompt_feedback", None)
+                if pf is not None:
+                    br = getattr(pf, "block_reason", None)
+                    block_reason = (str(br.name) if hasattr(br, "name") else str(br or "")).upper()
+            except Exception:
+                pass
+
+            safety_info = ", ".join(blocked_cats) if blocked_cats else ""
+
+            # 사유별 메시지 분류 — [TRANSIENT] 마커가 있으면 llm_client가 재시도
+            if "SAFETY" in (finish_reason + " " + block_reason) or blocked_cats:
+                raise RuntimeError(
+                    "Gemini 안전 필터에 의해 응답이 차단되었습니다.\n"
+                    f"  finish_reason: {finish_reason or '(없음)'}\n"
+                    f"  block_reason: {block_reason or '(없음)'}\n"
+                    f"  safety: {safety_info or '(없음)'}\n"
+                    "해결: 프롬프트에서 차단 트리거가 될만한 내용을 줄이세요."
+                )
+            if "RECITATION" in finish_reason:
+                raise RuntimeError(
+                    "Gemini가 학습 데이터 인용 가능성으로 응답을 거부했습니다 (RECITATION).\n"
+                    "해결: 입력 컨텐츠를 다르게 표현하거나, 다른 모델을 사용하세요."
+                )
+            if "MAX_TOKENS" in finish_reason:
+                raise RuntimeError(
+                    f"Gemini가 max_output_tokens={max_tokens}에 도달했으나 결과는 비어 있습니다.\n"
+                    "해결: max_output_tokens를 늘리세요 (프롬프트 frontmatter)."
+                )
+            # 기타 — 일시 장애로 간주, 재시도 가능
+            raise RuntimeError(
+                f"[TRANSIENT] Gemini가 빈 응답을 반환했습니다 "
+                f"(finish_reason={finish_reason or '(없음)'}). API 일시 장애일 수 있습니다."
+            )
+
         # Gemini usage_metadata: prompt_token_count, candidates_token_count
         usage = response.usage_metadata
         input_tokens = getattr(usage, "prompt_token_count", 0) or 0
