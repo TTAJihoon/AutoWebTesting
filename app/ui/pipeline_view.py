@@ -359,6 +359,38 @@ class PipelineView(QMainWindow):
         self._feature_dl_btn.clicked.connect(self._export_features)
         bot_lay.addWidget(self._feature_dl_btn)
 
+        # 기능목록 CSV 다운로드 (자체 추출 — 대/중/소 분류)
+        self._feature_csv_btn = QPushButton("⬇ 기능목록 CSV")
+        self._feature_csv_btn.setVisible(False)
+        self._feature_csv_btn.setStyleSheet(
+            "QPushButton {"
+            " background-color: #14b8a6; color: #ffffff;"
+            " border: none; border-radius: 6px;"
+            " padding: 6px 14px; font-size: 12px; font-weight: 600; }"
+            "QPushButton:hover { background-color: #0d9488; }"
+        )
+        self._feature_csv_btn.setToolTip(
+            "프로그램이 자체적으로 추출한 기능 리스트(대/중/소 분류) CSV 다운로드"
+        )
+        self._feature_csv_btn.clicked.connect(self._export_features_csv)
+        bot_lay.addWidget(self._feature_csv_btn)
+
+        # 스크린샷 폴더 열기 버튼
+        self._screenshot_dir_btn = QPushButton("📂 스크린샷 폴더")
+        self._screenshot_dir_btn.setVisible(False)
+        self._screenshot_dir_btn.setStyleSheet(
+            "QPushButton {"
+            " background-color: #ffffff; color: #475569;"
+            " border: 1px solid #cbd5e1; border-radius: 6px;"
+            " padding: 6px 12px; font-size: 12px; font-weight: 600; }"
+            "QPushButton:hover { background-color: #f1f5f9; color: #1e293b; }"
+        )
+        self._screenshot_dir_btn.setToolTip(
+            "Stage 0 DOM 스캔 시 자동 저장된 페이지 스크린샷 폴더를 엽니다"
+        )
+        self._screenshot_dir_btn.clicked.connect(self._open_screenshot_dir)
+        bot_lay.addWidget(self._screenshot_dir_btn)
+
         # Stage 4 Reviewer Gate 버튼 (Stage 3 완료 후 표시)
         self._gate_btn = QPushButton("Stage 4: Reviewer Gate 실행")
         self._gate_btn.setEnabled(False)
@@ -433,9 +465,13 @@ class PipelineView(QMainWindow):
         self._exec_btn.setEnabled(False)
         self._gate_btn.setVisible(True)
         self._gate_btn.setEnabled(True)
-        # Stage 0 스캔 결과 있으면 기능목록 다운로드 버튼 표시
-        feature_draft = self._orch.run_dir / "dom-scan" / "feature-spec-draft.json"
-        self._feature_dl_btn.setVisible(feature_draft.exists())
+        # Stage 0 스캔 결과 있으면 기능목록(Excel/CSV) + 스크린샷 폴더 버튼 표시
+        feature_draft   = self._orch.run_dir / "dom-scan" / "feature-spec-draft.json"
+        screenshots_dir = self._orch.run_dir / "dom-scan" / "screenshots"
+        has_draft = feature_draft.exists()
+        self._feature_dl_btn.setVisible(has_draft)
+        self._feature_csv_btn.setVisible(has_draft)
+        self._screenshot_dir_btn.setVisible(screenshots_dir.exists())
         self._write_meta("stage3_done")
         self._set_status(f"Stage 3 완료  |  TC {len(tcs)}개", active=True)
         self._append_log(f"Stage 3 완료 - TC {len(tcs)}개. Reviewer Gate를 진행하세요.")
@@ -491,6 +527,76 @@ class PipelineView(QMainWindow):
             f"tc_final.xlsx 생성 완료\n\n"
             f"총 {total}개  PASS {passed}  FAIL {failed}\n\n{out}"
         )
+
+    # ── 기능목록 CSV 다운로드 ─────────────────────────────────────────────────
+    def _export_features_csv(self) -> None:
+        """Stage 0 자체 추출 기능 목록을 CSV(대/중/소 분류)로 저장."""
+        draft_path = self._orch.run_dir / "dom-scan" / "feature-spec-draft.json"
+        if not draft_path.exists():
+            QMessageBox.warning(self, "알림", "Stage 0 DOM 스캔 결과가 없습니다.")
+            return
+
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "기능 목록 CSV 저장",
+            f"feature_list_{self._config.run_id}.csv",
+            "CSV 파일 (*.csv);;모든 파일 (*.*)",
+        )
+        if not save_path:
+            return
+
+        try:
+            import csv as _csv
+            draft = json.loads(draft_path.read_text(encoding="utf-8"))
+            features = draft.get("features", [])
+            if not features:
+                QMessageBox.information(self, "알림", "추출된 기능이 없습니다.")
+                return
+            # utf-8-sig: Excel에서 한글 깨지지 않도록 BOM 포함
+            with open(save_path, "w", newline="", encoding="utf-8-sig") as f:
+                writer = _csv.writer(f)
+                writer.writerow([
+                    "대분류", "중분류", "소분류",
+                    "요구사항 ID", "신뢰도", "출처 URL", "스크린샷",
+                ])
+                for ft in features:
+                    writer.writerow([
+                        ft.get("category_major", ""),
+                        ft.get("category_mid", ""),
+                        ft.get("category_leaf", ""),
+                        ft.get("requirement_id", ""),
+                        ft.get("confidence", ""),
+                        ft.get("source_url", ""),
+                        ft.get("screenshot_file", ""),
+                    ])
+            QMessageBox.information(
+                self, "저장 완료",
+                f"기능 목록 {len(features)}개를 CSV로 저장했습니다:\n{save_path}",
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "저장 실패", str(e))
+
+    # ── 스크린샷 폴더 열기 ────────────────────────────────────────────────────
+    def _open_screenshot_dir(self) -> None:
+        """Stage 0 스크린샷 폴더를 OS 파일 탐색기로 연다."""
+        path = self._orch.run_dir / "dom-scan" / "screenshots"
+        if not path.exists():
+            QMessageBox.warning(
+                self, "알림",
+                "스크린샷 폴더가 아직 생성되지 않았습니다.\n(Stage 0 DOM 스캔이 필요합니다.)"
+            )
+            return
+        try:
+            import os as _os, sys as _sys, subprocess as _sp
+            abspath = str(path.resolve())
+            if _sys.platform == "win32":
+                _os.startfile(abspath)
+            elif _sys.platform == "darwin":
+                _sp.run(["open", abspath])
+            else:
+                _sp.run(["xdg-open", abspath])
+        except Exception as e:
+            QMessageBox.critical(self, "폴더 열기 실패", str(e))
 
     # ── 기능목록 Excel 다운로드 ───────────────────────────────────────────────
     def _export_features(self) -> None:

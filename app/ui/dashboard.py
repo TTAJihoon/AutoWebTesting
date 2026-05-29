@@ -196,18 +196,35 @@ class Dashboard(QMainWindow):
         top.addWidget(self._new_btn)
         lay.addLayout(top)
 
-        # 테이블
-        self._runs_table = QTableWidget(0, 5)
-        self._runs_table.setHorizontalHeaderLabels(["Run ID", "대상 URL", "TC 수", "단계", "일시"])
-        self._runs_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        # 테이블 (admin: 체크박스 컬럼 포함 6열, reviewer: 5열)
+        col_count = 6 if self._role == "admin" else 5
+        labels = (
+            ["선택", "Run ID", "대상 URL", "TC 수", "단계", "일시"]
+            if self._role == "admin"
+            else ["Run ID", "대상 URL", "TC 수", "단계", "일시"]
+        )
+        self._runs_table = QTableWidget(0, col_count)
+        self._runs_table.setHorizontalHeaderLabels(labels)
+        # 'URL' 컬럼의 인덱스 (admin: 2, reviewer: 1)
+        self._url_col = 2 if self._role == "admin" else 1
+        # 'Run ID' 컬럼 인덱스 (admin: 1, reviewer: 0)
+        self._runid_col = 1 if self._role == "admin" else 0
+
+        hh = self._runs_table.horizontalHeader()
+        if self._role == "admin":
+            hh.setSectionResizeMode(0, QHeaderView.Fixed)
+            self._runs_table.setColumnWidth(0, 50)
+        hh.setSectionResizeMode(self._url_col, QHeaderView.Stretch)
+
         self._runs_table.setSelectionBehavior(QTableWidget.SelectRows)
         self._runs_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self._runs_table.doubleClicked.connect(self._open_run)
         self._runs_table.setContextMenuPolicy(Qt.CustomContextMenu)
         self._runs_table.customContextMenuRequested.connect(self._on_runs_context_menu)
-        # admin: 행 선택 시 삭제 버튼 활성화
+        # admin: 체크박스 변경/선택 시 삭제 버튼 활성화
         if self._role == "admin":
             self._runs_table.itemSelectionChanged.connect(self._on_run_selection_changed)
+            self._runs_table.itemChanged.connect(self._on_check_changed)
         self._runs_table.setStyleSheet(
             "QTableWidget { border: none; background: #ffffff; }"
             "QHeaderView::section { background-color: #f8fafc; color: #64748b;"
@@ -278,6 +295,22 @@ class Dashboard(QMainWindow):
         self._api_edit.setFixedHeight(36)
         api_row.addWidget(self._api_edit)
 
+        # API key 보이기/숨기기 토글
+        self._api_show_btn = QPushButton("👁")
+        self._api_show_btn.setCheckable(True)
+        self._api_show_btn.setFixedSize(40, 36)
+        self._api_show_btn.setToolTip("API Key 보이기/숨기기")
+        self._api_show_btn.setStyleSheet(
+            "QPushButton { background: #ffffff; color: #64748b;"
+            " border: 1px solid #e2e8f0; border-radius: 6px;"
+            " font-size: 14px; padding: 0; }"
+            "QPushButton:hover { background: #f1f5f9; }"
+            "QPushButton:checked { background: #eff6ff; color: #1d4ed8;"
+            " border-color: #93c5fd; }"
+        )
+        self._api_show_btn.toggled.connect(self._toggle_api_visible)
+        api_row.addWidget(self._api_show_btn)
+
         _btn_style = (
             "QPushButton { border-radius: 6px; padding: 0 14px; font-size: 12px;"
             " font-weight: 600; height: 36px; }"
@@ -320,6 +353,13 @@ class Dashboard(QMainWindow):
         outer_lay.addWidget(card)
         outer_lay.addStretch()
         return outer
+
+    def _toggle_api_visible(self, visible: bool) -> None:
+        """API Key 입력란의 마스킹 토글."""
+        self._api_edit.setEchoMode(
+            QLineEdit.Normal if visible else QLineEdit.Password
+        )
+        self._api_show_btn.setText("🙈" if visible else "👁")
 
     def _on_provider_changed(self, index: int) -> None:
         """Provider 드롭다운 변경 시 — 활성 provider 갱신 + 해당 키 로드."""
@@ -370,53 +410,100 @@ class Dashboard(QMainWindow):
 
     # ── 데이터 로딩 ──────────────────────────────────────────────────────
     def _load_runs(self) -> None:
-        self._runs_table.setRowCount(0)
-        if not RUNS_DIR.exists():
-            return
-        runs = sorted(RUNS_DIR.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
-        for run_dir in runs[:50]:
-            meta_path = run_dir / "meta.json"
-            meta: dict = {}
-            if meta_path.exists():
-                try:
-                    meta = json.loads(meta_path.read_text(encoding="utf-8"))
-                except Exception:
-                    pass
-            tc_count = "?"
-            tc_path = run_dir / "tc_raw.json"
-            if tc_path.exists():
-                try:
-                    tc_count = str(len(json.loads(tc_path.read_text(encoding="utf-8"))))
-                except Exception:
-                    pass
-            row = self._runs_table.rowCount()
-            self._runs_table.insertRow(row)
-            self._runs_table.setItem(row, 0, QTableWidgetItem(run_dir.name))
-            self._runs_table.setItem(row, 1, QTableWidgetItem(meta.get("target_url", "-")))
-            self._runs_table.setItem(row, 2, QTableWidgetItem(tc_count))
-            self._runs_table.setItem(row, 3, QTableWidgetItem(meta.get("stage", "-")))
-            self._runs_table.setItem(row, 4, QTableWidgetItem(meta.get("created_at", "-")))
+        # itemChanged 폭탄 방지
+        self._runs_table.blockSignals(True)
+        try:
+            self._runs_table.setRowCount(0)
+            if not RUNS_DIR.exists():
+                return
+            runs = sorted(RUNS_DIR.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
+            is_admin = self._role == "admin"
+            for run_dir in runs[:50]:
+                meta_path = run_dir / "meta.json"
+                meta: dict = {}
+                if meta_path.exists():
+                    try:
+                        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                    except Exception:
+                        pass
+                tc_count = "?"
+                tc_path = run_dir / "tc_raw.json"
+                if tc_path.exists():
+                    try:
+                        tc_count = str(len(json.loads(tc_path.read_text(encoding="utf-8"))))
+                    except Exception:
+                        pass
+                row = self._runs_table.rowCount()
+                self._runs_table.insertRow(row)
+
+                col_offset = 0
+                if is_admin:
+                    # 열 0: 체크박스
+                    chk = QTableWidgetItem()
+                    chk.setFlags(
+                        Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable
+                    )
+                    chk.setCheckState(Qt.Unchecked)
+                    chk.setTextAlignment(Qt.AlignCenter)
+                    self._runs_table.setItem(row, 0, chk)
+                    col_offset = 1
+
+                self._runs_table.setItem(row, col_offset + 0, QTableWidgetItem(run_dir.name))
+                self._runs_table.setItem(row, col_offset + 1, QTableWidgetItem(meta.get("target_url", "-")))
+                self._runs_table.setItem(row, col_offset + 2, QTableWidgetItem(tc_count))
+                self._runs_table.setItem(row, col_offset + 3, QTableWidgetItem(meta.get("stage", "-")))
+                self._runs_table.setItem(row, col_offset + 4, QTableWidgetItem(meta.get("created_at", "-")))
+        finally:
+            self._runs_table.blockSignals(False)
+        # 로드 후 삭제 버튼 상태 갱신
+        if self._role == "admin":
+            self._on_check_changed()
 
     def _open_run(self) -> None:
         row = self._runs_table.currentRow()
         if row < 0:
             return
-        run_id = self._runs_table.item(row, 0).text()
+        item = self._runs_table.item(row, self._runid_col)
+        if not item:
+            return
+        run_id = item.text()
         self.open_run_requested.emit(run_id)
 
     def _on_run_selection_changed(self) -> None:
-        """행 선택 변경 시 삭제 버튼 활성화/비활성화 (admin 전용)."""
-        has_selection = len(self._runs_table.selectedRows()) > 0 \
-            if hasattr(self._runs_table, "selectedRows") \
-            else self._runs_table.currentRow() >= 0
-        self._del_run_btn.setEnabled(has_selection)
+        """행 선택 변경 시(체크 상태와 무관) 삭제 버튼 상태 갱신."""
+        # admin: 체크박스 우선, 선택 행은 대체 트리거
+        self._on_check_changed()
+
+    def _on_check_changed(self, _item=None) -> None:
+        """체크박스 변경 시 삭제 버튼 활성화/비활성화 + 라벨에 개수 표시."""
+        if self._role != "admin":
+            return
+        checked_rows = self._collect_checked_rows()
+        n = len(checked_rows)
+        if n > 0:
+            self._del_run_btn.setText(f"🗑  이력 삭제 ({n})")
+            self._del_run_btn.setEnabled(True)
+        else:
+            self._del_run_btn.setText("🗑  이력 삭제")
+            self._del_run_btn.setEnabled(False)
+
+    def _collect_checked_rows(self) -> list[int]:
+        """체크된 행 인덱스 목록을 반환 (admin 전용)."""
+        if self._role != "admin":
+            return []
+        rows: list[int] = []
+        for r in range(self._runs_table.rowCount()):
+            chk = self._runs_table.item(r, 0)
+            if chk is not None and chk.checkState() == Qt.Checked:
+                rows.append(r)
+        return rows
 
     def _on_runs_context_menu(self, pos) -> None:
         """우클릭 컨텍스트 메뉴 — 복제 / admin이면 삭제도."""
         row = self._runs_table.rowAt(pos.y())
         if row < 0:
             return
-        url_item = self._runs_table.item(row, 1)
+        url_item = self._runs_table.item(row, self._url_col)
         url = url_item.text() if url_item else ""
         has_url = bool(url) and url != "-"
 
@@ -435,48 +522,99 @@ class Dashboard(QMainWindow):
             self.clone_run_requested.emit(url)
             self.statusBar().showMessage(f"URL 복사됨: {url}", 3000)
         elif action is not None and action == delete_action:
-            # 우클릭한 행을 선택 후 삭제
+            # 우클릭 → 해당 행만 체크 후 삭제 (다중 체크된 상태 보존)
+            chk = self._runs_table.item(row, 0)
+            if chk is not None:
+                chk.setCheckState(Qt.Checked)
             self._runs_table.selectRow(row)
             self._delete_run()
 
     def _delete_run(self) -> None:
-        """선택된 실행 이력을 영구 삭제 (admin 전용)."""
+        """체크된 실행 이력을 영구 삭제 (admin 전용, 다중 가능)."""
         if self._role != "admin":
             return
-        row = self._runs_table.currentRow()
-        if row < 0:
-            QMessageBox.information(self, "알림", "삭제할 이력을 선택하세요.")
+
+        checked_rows = self._collect_checked_rows()
+        # 체크박스 없으면 현재 선택 행 사용 (단건 폴백)
+        if not checked_rows:
+            cur = self._runs_table.currentRow()
+            if cur < 0:
+                QMessageBox.information(
+                    self, "알림",
+                    "체크박스로 삭제할 이력을 선택하거나, 행을 선택한 뒤 다시 누르세요."
+                )
+                return
+            checked_rows = [cur]
+
+        # 삭제 대상 정보 수집
+        targets: list[tuple[str, str, str]] = []   # (run_id, url, tc_count)
+        for r in checked_rows:
+            runid_item = self._runs_table.item(r, self._runid_col)
+            url_item   = self._runs_table.item(r, self._url_col)
+            tc_item    = self._runs_table.item(r, self._url_col + 1)
+            if runid_item:
+                targets.append((
+                    runid_item.text(),
+                    url_item.text() if url_item else "-",
+                    tc_item.text()  if tc_item  else "?",
+                ))
+
+        if not targets:
             return
 
-        run_id = self._runs_table.item(row, 0).text()
-        url = self._runs_table.item(row, 1).text() if self._runs_table.item(row, 1) else "-"
-        tc_count = self._runs_table.item(row, 2).text() if self._runs_table.item(row, 2) else "?"
+        # 확인 다이얼로그
+        n = len(targets)
+        if n == 1:
+            rid, url, tc_n = targets[0]
+            body = (
+                f"아래 이력과 관련 파일(스크린샷, TC 파일, LLM 로그 등)을 모두 영구 삭제합니다.\n\n"
+                f"  Run ID : {rid}\n"
+                f"  URL    : {url}\n"
+                f"  TC 수  : {tc_n}\n\n"
+                "이 작업은 되돌릴 수 없습니다. 계속하시겠습니까?"
+            )
+        else:
+            lines = "\n".join(
+                f"  • {rid}  ({url} / TC {tc_n})" for rid, url, tc_n in targets[:10]
+            )
+            extra = f"\n  … 외 {n - 10}건" if n > 10 else ""
+            body = (
+                f"아래 {n}개 이력과 관련 파일을 모두 영구 삭제합니다.\n\n"
+                f"{lines}{extra}\n\n"
+                "이 작업은 되돌릴 수 없습니다. 계속하시겠습니까?"
+            )
 
         confirmed = QMessageBox.warning(
             self,
             "실행 이력 삭제",
-            f"아래 이력과 관련 파일(스크린샷, TC 파일, LLM 로그 등)을 모두 영구 삭제합니다.\n\n"
-            f"  Run ID : {run_id}\n"
-            f"  URL    : {url}\n"
-            f"  TC 수  : {tc_count}\n\n"
-            "이 작업은 되돌릴 수 없습니다. 계속하시겠습니까?",
+            body,
             QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,         # 기본값: No (실수 방지)
+            QMessageBox.No,
         )
         if confirmed != QMessageBox.Yes:
             return
 
-        run_dir = RUNS_DIR / run_id
-        try:
-            if run_dir.exists():
-                shutil.rmtree(run_dir)
-            self._load_runs()
-            self.statusBar().showMessage(f"'{run_id}' 삭제 완료", 4000)
-        except Exception as e:
+        # 일괄 삭제 (실패한 건 모아서 보고)
+        failed: list[tuple[str, str]] = []
+        ok = 0
+        for rid, _, _ in targets:
+            run_dir = RUNS_DIR / rid
+            try:
+                if run_dir.exists():
+                    shutil.rmtree(run_dir)
+                ok += 1
+            except Exception as e:
+                failed.append((rid, str(e)))
+
+        self._load_runs()
+        if failed:
+            msg = "\n".join(f"  • {rid} → {err}" for rid, err in failed[:5])
             QMessageBox.critical(
-                self, "삭제 실패",
-                f"'{run_id}' 삭제 중 오류가 발생했습니다:\n{e}"
+                self, "일부 삭제 실패",
+                f"{ok}개 삭제 / {len(failed)}개 실패\n\n{msg}"
             )
+        else:
+            self.statusBar().showMessage(f"{ok}개 이력 삭제 완료", 4000)
 
     # ── 설정 액션 ────────────────────────────────────────────────────────
     def _save_api_key(self) -> None:

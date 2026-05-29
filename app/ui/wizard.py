@@ -355,25 +355,52 @@ class RunWizard(QDialog):
 
         # 인증 테이블 (4열: action | selector/URL | value | 🎯)
         self._auth_table = QTableWidget(0, 4)
+        self._auth_table.setObjectName("auth_table")
         self._auth_table.setHorizontalHeaderLabels(
             ["action", "selector / URL", "값 (fill 전용)", ""]
         )
         # ① 너비를 먼저 지정한 뒤 ② Fixed 모드로 고정 (순서 중요)
-        self._auth_table.setColumnWidth(0, 80)
-        self._auth_table.setColumnWidth(2, 150)
-        self._auth_table.setColumnWidth(3, 40)
+        self._auth_table.setColumnWidth(0, 90)
+        self._auth_table.setColumnWidth(2, 160)
+        self._auth_table.setColumnWidth(3, 44)
         hh = self._auth_table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.Fixed)
         hh.setSectionResizeMode(1, QHeaderView.Stretch)
         hh.setSectionResizeMode(2, QHeaderView.Fixed)
         hh.setSectionResizeMode(3, QHeaderView.Fixed)
         # resizeSection 으로 한 번 더 강제 (Fixed 고정 후에도 적용됨)
-        hh.resizeSection(0, 80)
-        hh.resizeSection(2, 150)
-        hh.resizeSection(3, 40)
+        hh.resizeSection(0, 90)
+        hh.resizeSection(2, 160)
+        hh.resizeSection(3, 44)
         vh = self._auth_table.verticalHeader()
         vh.setVisible(False)
-        vh.setDefaultSectionSize(28)   # 행 높이 고정 → 콤보박스 레이아웃 안정화
+        vh.setDefaultSectionSize(34)
+
+        # ── APPLE_QSS 전역 스타일(pill 버튼, 큰 padding) 오버라이드 ────────────
+        # 핵심: 테이블 내부에서만 적용되는 컴팩트 스타일
+        self._auth_table.setStyleSheet(
+            "QComboBox {"
+            " min-height: 0px;"
+            " padding: 2px 8px;"
+            " border-radius: 4px;"
+            " border: 1px solid #c5d4e8;"
+            " background: #ffffff;"
+            "}"
+            "QComboBox::drop-down { width: 16px; border: none; }"
+            "QPushButton {"
+            " min-height: 0px;"
+            " min-width: 0px;"
+            " padding: 0px;"
+            " border-radius: 4px;"
+            " font-size: 14px;"
+            "}"
+            "QLineEdit {"
+            " padding: 2px 6px;"
+            " border-radius: 0px;"
+            " border: 1px solid #3b82f6;"
+            "}"
+            "QTableWidget::item { padding: 2px 6px; }"
+        )
         lay.addWidget(self._auth_table)
 
         row_btns = QHBoxLayout()
@@ -416,12 +443,17 @@ class RunWizard(QDialog):
         thresh_box = QGroupBox("INFERRED 비율 임계값")
         t_lay = QVBoxLayout(thresh_box)
         self._thresh_spin = QDoubleSpinBox()
-        self._thresh_spin.setRange(0.10, 0.80)
+        self._thresh_spin.setRange(0.10, 1.00)
         self._thresh_spin.setSingleStep(0.05)
         self._thresh_spin.setValue(0.30)
         self._thresh_spin.setDecimals(2)
         self._thresh_spin.setSuffix("  (30% 권장)")
         t_lay.addWidget(self._thresh_spin)
+        self._thresh_hint = QLabel("")
+        self._thresh_hint.setWordWrap(True)
+        self._thresh_hint.setStyleSheet("color:#dc2626; font-size:11px;")
+        self._thresh_hint.setVisible(False)
+        t_lay.addWidget(self._thresh_hint)
         lay.addWidget(thresh_box)
 
         # ── 최대 기능 수 (max_leaves) ────────────────────────────────────
@@ -462,7 +494,30 @@ class RunWizard(QDialog):
         self._back_btn.setEnabled(True)
         if idx + 1 == 2:
             self._next_btn.setText("실행 시작")
+            self._refresh_step3_state()      # 매뉴얼 첨부 여부에 따라 임계값 자동 조정
         self._step_lbl.setText(f"Step {idx + 2} / 3")
+
+    def _refresh_step3_state(self) -> None:
+        """Step 3 진입 시 매뉴얼 첨부 여부에 따라 INFERRED 임계값을 자동 조정.
+
+        매뉴얼이 없으면 모든 leaf가 implicit_spec(DOM 추론)으로 들어가서
+        INFERRED 비율이 100%가 되므로 임계값 검사는 의미가 없음.
+        → 임계값을 1.0으로 강제하고 입력을 비활성화한다.
+        """
+        no_manual = self._file_list.count() == 0
+        if no_manual:
+            self._thresh_spin.setValue(1.00)
+            self._thresh_spin.setEnabled(False)
+            self._thresh_hint.setText(
+                "⚠  매뉴얼 미첨부 → DOM 단독 추론 모드 — INFERRED 비율 100% 자동 적용 (임계값 검사 비활성)"
+            )
+            self._thresh_hint.setVisible(True)
+        else:
+            self._thresh_spin.setEnabled(True)
+            if abs(self._thresh_spin.value() - 1.00) < 1e-6:
+                # 이전에 자동 1.00이 적용된 흔적 — 기본값으로 복귀
+                self._thresh_spin.setValue(0.30)
+            self._thresh_hint.setVisible(False)
 
     def _go_back(self) -> None:
         idx = self._stack.currentIndex()
@@ -546,7 +601,7 @@ class RunWizard(QDialog):
     def _add_auth_row(self) -> None:
         r = self._auth_table.rowCount()
         self._auth_table.insertRow(r)
-        self._auth_table.setRowHeight(r, 28)   # 콤보박스 높이에 맞춰 행 고정
+        self._auth_table.setRowHeight(r, 34)   # 컴팩트한 행 높이
 
         # 열 0: action QComboBox
         combo = QComboBox()
@@ -557,7 +612,17 @@ class RunWizard(QDialog):
         # 열 3: 🎯 선택자 피커 버튼 (WebEngine 있을 때만)
         if _HAS_WEBENGINE:
             btn = QPushButton("🎯")
-            btn.setFixedSize(36, 24)   # 너비·높이 모두 고정
+            btn.setFixedSize(36, 26)   # 너비·높이 모두 고정
+            btn.setStyleSheet(
+                "QPushButton {"
+                " background: #f1f5f9; color: #1e293b;"
+                " border: 1px solid #cbd5e1; border-radius: 4px;"
+                " min-height: 0px; min-width: 0px; padding: 0px;"
+                " font-size: 14px;"
+                "}"
+                "QPushButton:hover { background: #e2e8f0; }"
+                "QPushButton:disabled { background: #f8fafc; color: #cbd5e1; }"
+            )
             btn.setToolTip(
                 "URL을 팝업 브라우저로 열어 요소를 클릭하면 선택자가 자동 입력됩니다."
             )
