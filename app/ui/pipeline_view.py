@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QFont, QColor, QTextCursor, QTextBlockFormat, QFontMetrics
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFrame,
-    QLabel, QPushButton, QPlainTextEdit,
+    QLabel, QPushButton, QPlainTextEdit, QLineEdit,
     QSplitter, QTableWidget, QTableWidgetItem, QHeaderView,
     QMessageBox, QStatusBar, QFileDialog, QDialog,
 )
@@ -269,6 +269,39 @@ class PipelineView(QMainWindow):
         log_hdr_row.addWidget(log_hdr)
         log_hdr_row.addStretch()
 
+        # 로그 검색 입력
+        self._log_search = QLineEdit()
+        self._log_search.setPlaceholderText("🔍  로그 검색…")
+        self._log_search.setFixedHeight(24)
+        self._log_search.setFixedWidth(180)
+        self._log_search.setStyleSheet(
+            "QLineEdit { background: #ffffff; border: 1px solid #cbd5e1;"
+            " border-radius: 4px; padding: 2px 8px; font-size: 11px; }"
+            "QLineEdit:focus { border: 1px solid #3b82f6; padding: 1px 7px; }"
+        )
+        self._log_search.returnPressed.connect(self._log_find_next)
+        self._log_search.textChanged.connect(self._log_search_changed)
+        log_hdr_row.addWidget(self._log_search)
+
+        self._log_prev_btn = QPushButton("↑")
+        self._log_prev_btn.setFixedSize(24, 24)
+        self._log_prev_btn.setToolTip("이전 결과 (Shift+Enter)")
+        self._log_prev_btn.clicked.connect(self._log_find_prev)
+        self._log_next_btn = QPushButton("↓")
+        self._log_next_btn.setFixedSize(24, 24)
+        self._log_next_btn.setToolTip("다음 결과 (Enter)")
+        self._log_next_btn.clicked.connect(self._log_find_next)
+        _find_btn_css = (
+            "QPushButton { background: #ffffff; color: #475569;"
+            " border: 1px solid #cbd5e1; border-radius: 4px;"
+            " font-size: 12px; min-height: 0px; padding: 0; }"
+            "QPushButton:hover { background: #f1f5f9; }"
+        )
+        self._log_prev_btn.setStyleSheet(_find_btn_css)
+        self._log_next_btn.setStyleSheet(_find_btn_css)
+        log_hdr_row.addWidget(self._log_prev_btn)
+        log_hdr_row.addWidget(self._log_next_btn)
+
         self._toggle_raw_btn = QPushButton("📋  상세 로그")
         self._toggle_raw_btn.setCheckable(True)
         self._toggle_raw_btn.setFixedHeight(24)
@@ -328,6 +361,31 @@ class PipelineView(QMainWindow):
             " font-size: 15px; font-weight: 700; color: #1e293b; }"
         )
         tc_hdr_row.addWidget(tc_title)
+
+        # 스냅샷 출처 라벨 — 과거 스냅샷 표시 중일 때 노란색 강조
+        self._snapshot_lbl = QLabel("")
+        self._snapshot_lbl.setStyleSheet(
+            "QLabel { font-size: 11px; color: #64748b; padding: 0 6px;"
+            " background: transparent; border: none; }"
+        )
+        tc_hdr_row.addWidget(self._snapshot_lbl)
+
+        # "최신 상태로" 버튼 (스냅샷 보고 있을 때만 표시)
+        self._latest_btn = QPushButton("↺  최신 상태")
+        self._latest_btn.setFixedHeight(24)
+        self._latest_btn.setVisible(False)
+        self._latest_btn.setStyleSheet(
+            "QPushButton { background: #fef3c7; color: #92400e;"
+            " border: 1px solid #fcd34d; border-radius: 4px;"
+            " padding: 0 10px; font-size: 11px; min-height: 0px; }"
+            "QPushButton:hover { background: #fde68a; }"
+        )
+        self._latest_btn.setToolTip(
+            "현재 진행 단계의 최신 TC 상태로 돌아갑니다"
+        )
+        self._latest_btn.clicked.connect(self._show_latest)
+        tc_hdr_row.addWidget(self._latest_btn)
+
         tc_hdr_row.addStretch()
         self._tc_count_lbl = QLabel("총 0건")
         self._tc_count_lbl.setStyleSheet(
@@ -337,6 +395,11 @@ class PipelineView(QMainWindow):
         )
         tc_hdr_row.addWidget(self._tc_count_lbl)
         tc_lay.addLayout(tc_hdr_row)
+
+        # 스냅샷 상태 추적: None=현재(최신), 그 외=과거 stage 번호
+        self._viewing_snapshot: int | None = None
+        # 최신 상태 backup (스냅샷 보기로 전환 전의 TC)
+        self._latest_tcs_backup: list[dict] | None = None
 
         self._tc_table = QTableWidget(0, 7)
         self._tc_table.setHorizontalHeaderLabels(
@@ -423,6 +486,40 @@ class PipelineView(QMainWindow):
         )
         self._exec_btn.clicked.connect(self._start_post_gate)
         bot_lay.addWidget(self._exec_btn)
+
+        # ── 일시정지·중단 버튼 (Stage 5 실행 중에만 표시) ───────────────────
+        self._pause_btn = QPushButton("⏸  일시정지")
+        self._pause_btn.setCheckable(True)
+        self._pause_btn.setVisible(False)
+        self._pause_btn.setStyleSheet(
+            "QPushButton {"
+            " background: #fef9c3; color: #854d0e;"
+            " border: 1px solid #fde047; border-radius: 6px;"
+            " padding: 6px 14px; font-size: 12px; font-weight: 600; }"
+            "QPushButton:hover { background: #fef08a; }"
+            "QPushButton:checked {"
+            " background: #16a34a; color: #ffffff; border-color: #16a34a; }"
+        )
+        self._pause_btn.setToolTip(
+            "다음 TC 실행 전 일시정지합니다 (현재 TC는 완료 후 정지)"
+        )
+        self._pause_btn.toggled.connect(self._toggle_pause)
+        bot_lay.addWidget(self._pause_btn)
+
+        self._stop_btn = QPushButton("⏹  중단")
+        self._stop_btn.setVisible(False)
+        self._stop_btn.setStyleSheet(
+            "QPushButton {"
+            " background: #ffffff; color: #dc2626;"
+            " border: 1px solid #fca5a5; border-radius: 6px;"
+            " padding: 6px 14px; font-size: 12px; font-weight: 600; }"
+            "QPushButton:hover { background: #fee2e2; }"
+        )
+        self._stop_btn.setToolTip(
+            "다음 TC 실행을 건너뛰고 즉시 종료합니다 (현재 TC 완료 후 정지)"
+        )
+        self._stop_btn.clicked.connect(self._request_stop)
+        bot_lay.addWidget(self._stop_btn)
 
         # Stage 1~3 실행 버튼 (초기 상태)
         self._run_btn = QPushButton("Stage 1~3 실행")
@@ -525,6 +622,11 @@ class PipelineView(QMainWindow):
             self._append_log(f"Stage {stage_num}은 아직 진행되지 않았습니다.")
             return
 
+        # 현재 진행 단계를 클릭한 경우 → 최신 상태로 복귀
+        if stage_num == self._max_progress and self._viewing_snapshot is not None:
+            self._show_latest()
+            return
+
         # stage → JSON 파일 매핑
         snapshot_map = {
             2: ("tc_raw.json",      "Stage 2 (TC 설계 직후)"),
@@ -547,11 +649,55 @@ class PipelineView(QMainWindow):
         try:
             import json as _json
             tcs = _json.loads(path.read_text(encoding="utf-8"))
+
+            # 최신 상태가 아직 백업되지 않았으면 백업
+            if self._viewing_snapshot is None:
+                self._latest_tcs_backup = list(self._tcs)
+
             self._tcs = tcs
+            self._viewing_snapshot = stage_num
             self._refresh_tc_table()
+            self._update_snapshot_indicator(stage_num, label, fname)
             self._append_log(f"📂 {label} 스냅샷 표시 — TC {len(tcs)}개 ({fname})")
         except Exception as e:
             self._append_log(f"⚠ 스냅샷 로드 실패: {e}")
+
+    def _show_latest(self) -> None:
+        """과거 스냅샷 → 최신 진행 상태로 복귀."""
+        if self._viewing_snapshot is None:
+            return
+        if self._latest_tcs_backup is not None:
+            self._tcs = self._latest_tcs_backup
+            self._latest_tcs_backup = None
+        self._viewing_snapshot = None
+        self._refresh_tc_table()
+        self._update_snapshot_indicator(None, "", "")
+        self._append_log("↺  최신 상태로 복귀")
+
+    def _update_snapshot_indicator(
+        self, stage_num: int | None, label: str, fname: str
+    ) -> None:
+        """스냅샷 라벨·테이블 배경·버튼 가시성 갱신."""
+        if stage_num is None:
+            self._snapshot_lbl.setText("")
+            self._snapshot_lbl.setStyleSheet(
+                "QLabel { font-size: 11px; color: #64748b; padding: 0 6px;"
+                " background: transparent; border: none; }"
+            )
+            self._latest_btn.setVisible(False)
+            self._tc_table.setStyleSheet(
+                self._tc_table.styleSheet().replace(
+                    "background: #fffbeb;", "background: #ffffff;"
+                )
+            )
+        else:
+            self._snapshot_lbl.setText(f"📂  {label} 보는 중 ({fname})")
+            self._snapshot_lbl.setStyleSheet(
+                "QLabel { font-size: 11px; color: #92400e;"
+                " background: #fef3c7; border: 1px solid #fcd34d;"
+                " border-radius: 4px; padding: 2px 8px; font-weight: 600; }"
+            )
+            self._latest_btn.setVisible(True)
 
     def _set_status(self, text: str, active: bool = False, running: bool | None = None) -> None:
         """상태 표시 갱신.
@@ -669,6 +815,10 @@ class PipelineView(QMainWindow):
 
     def _on_pre_gate_done(self, tcs: list) -> None:
         self._tcs = tcs
+        # 진행이 갱신됐으므로 스냅샷 상태 초기화
+        self._viewing_snapshot = None
+        self._latest_tcs_backup = None
+        self._update_snapshot_indicator(None, "", "")
         self._refresh_tc_table()
         # 버튼 전환: 실행 버튼 숨기고 Gate + 5~7대기 표시
         self._run_btn.setVisible(False)
@@ -710,16 +860,56 @@ class PipelineView(QMainWindow):
         self._set_status("Stage 5~7 실행 중")
         self._append_log("Stage 5~7 시작...")
 
+        # 일시정지/중단 버튼 노출 + 플래그 리셋
+        self._orch.set_paused(False)
+        self._orch.set_stopped(False)
+        self._pause_btn.setChecked(False)
+        self._pause_btn.setText("⏸  일시정지")
+        self._pause_btn.setVisible(True)
+        self._stop_btn.setVisible(True)
+
         self._post_worker = _PostGateWorker(orch=self._orch)
         self._post_worker.stage_done.connect(self._on_post_stage_done)
         self._post_worker.finished.connect(self._on_post_gate_done)
         self._post_worker.error.connect(self._on_error)
         self._post_worker.start()
 
+    # ── 일시정지 / 중단 ───────────────────────────────────────────────────
+    def _toggle_pause(self, paused: bool) -> None:
+        self._orch.set_paused(paused)
+        if paused:
+            self._pause_btn.setText("▶  재개")
+            self._append_log("⏸  일시정지 요청 — 현재 TC 완료 후 정지")
+        else:
+            self._pause_btn.setText("⏸  일시정지")
+            self._append_log("▶  재개 요청 — 다음 TC부터 진행")
+
+    def _request_stop(self) -> None:
+        from PySide6.QtWidgets import QMessageBox as _MB
+        res = _MB.question(
+            self, "중단 확인",
+            "현재 TC 완료 후 Stage 5 실행을 중단합니다.\n"
+            "지금까지 실행된 결과는 보존됩니다. 계속하시겠습니까?",
+            _MB.Yes | _MB.No, _MB.No,
+        )
+        if res != _MB.Yes:
+            return
+        self._orch.set_stopped(True)
+        # 일시정지 상태였으면 풀어서 즉시 중단되도록
+        if self._orch.is_paused():
+            self._orch.set_paused(False)
+        self._pause_btn.setEnabled(False)
+        self._stop_btn.setEnabled(False)
+        self._append_log("⏹  중단 요청 — 현재 TC 완료 후 종료")
+
     def _on_post_stage_done(self, n: int) -> None:
         """stage_done emit: n = 방금 완료된 단계(5~7). n+1이 다음 활성."""
         badges = {5: "Stage 6 실행 중", 6: "Stage 7 실행 중", 7: "모든 단계 완료"}
         self._update_circles(n + 1, badges.get(n, ""))
+        # Stage 5 완료 후에는 일시정지/중단 버튼 더 이상 의미 없음 → 숨김
+        if n >= 5:
+            self._pause_btn.setVisible(False)
+            self._stop_btn.setVisible(False)
 
     def _on_post_gate_done(self, out: Path) -> None:
         self._tcs = self._orch.tcs
@@ -852,6 +1042,55 @@ class PipelineView(QMainWindow):
         self._set_status("오류 발생")
         self._append_log(f"[오류]\n{msg}")
         QMessageBox.critical(self, "오류", msg[:800])
+
+    # ── 로그 검색 ───────────────────────────────────────────────────────────
+    def _active_log(self) -> QPlainTextEdit:
+        """현재 표시 중인 로그 패널(raw 또는 일반)을 반환."""
+        return self._raw_log if self._toggle_raw_btn.isChecked() else self._log
+
+    def _log_search_changed(self, text: str) -> None:
+        """검색어 변경 시 첫 일치 위치로 이동."""
+        if not text:
+            return
+        # 첫 위치로 검색
+        from PySide6.QtGui import QTextCursor
+        widget = self._active_log()
+        cursor = widget.document().find(text)
+        if not cursor.isNull():
+            widget.setTextCursor(cursor)
+            widget.ensureCursorVisible()
+
+    def _log_find_next(self) -> None:
+        from PySide6.QtGui import QTextCursor
+        text = self._log_search.text()
+        if not text:
+            return
+        widget = self._active_log()
+        cursor = widget.document().find(text, widget.textCursor())
+        if cursor.isNull():
+            # 끝까지 갔으면 처음부터
+            cursor = widget.document().find(text)
+        if not cursor.isNull():
+            widget.setTextCursor(cursor)
+            widget.ensureCursorVisible()
+
+    def _log_find_prev(self) -> None:
+        from PySide6.QtGui import QTextCursor, QTextDocument
+        text = self._log_search.text()
+        if not text:
+            return
+        widget = self._active_log()
+        cursor = widget.document().find(text, widget.textCursor(),
+                                         QTextDocument.FindBackward)
+        if cursor.isNull():
+            # 처음까지 갔으면 끝부터
+            end_cursor = QTextCursor(widget.document())
+            end_cursor.movePosition(QTextCursor.End)
+            cursor = widget.document().find(text, end_cursor,
+                                             QTextDocument.FindBackward)
+        if not cursor.isNull():
+            widget.setTextCursor(cursor)
+            widget.ensureCursorVisible()
 
     # ── 상세(raw) 로그 ───────────────────────────────────────────────────────
     def _append_raw_log(self, msg: str) -> None:

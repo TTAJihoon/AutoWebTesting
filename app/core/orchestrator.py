@@ -108,6 +108,22 @@ class Orchestrator:
         self.tcs: list[dict] = []
         self.ingest_result: dict = {}
         self._stage = 0
+        # 협력적 일시정지/중단 플래그 (UI가 set, stage5가 read)
+        self._paused  = False
+        self._stopped = False
+
+    # ── 일시정지/중단 ────────────────────────────────────────────────────
+    def set_paused(self, paused: bool) -> None:
+        self._paused = paused
+
+    def is_paused(self) -> bool:
+        return self._paused
+
+    def set_stopped(self, stopped: bool) -> None:
+        self._stopped = stopped
+
+    def is_stopped(self) -> bool:
+        return self._stopped
 
     # ── Stage 0 ──────────────────────────────────────────────────────────
     def run_stage0(self) -> dict:
@@ -201,6 +217,9 @@ class Orchestrator:
     # ── Stage 5 ──────────────────────────────────────────────────────────
     def run_stage5(self) -> list[dict]:
         self._cb("▶ Stage 5: Playwright 자동 실행")
+        # 시작 전 플래그 리셋 (이전 실행이 중단된 상태일 수 있음)
+        self._paused  = False
+        self._stopped = False
         self.tcs = stage5_execute.execute(
             tcs=self.tcs,
             base_url=self.config.target_url,
@@ -208,6 +227,8 @@ class Orchestrator:
             progress_cb=self._cb,
             headless=self.config.headless_exec,
             slow_mo_ms=self.config.slow_mo_ms,
+            is_paused=self.is_paused,
+            is_stopped=self.is_stopped,
         )
         self._save_intermediate("tc_executed")
         self._stage = 5

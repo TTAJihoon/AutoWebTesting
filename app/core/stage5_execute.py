@@ -19,16 +19,34 @@ def execute(
     progress_cb: Callable[[str], None] | None = None,
     headless: bool = True,
     slow_mo_ms: int = 0,
+    is_paused: Callable[[], bool] | None = None,
+    is_stopped: Callable[[], bool] | None = None,
 ) -> list[dict]:
     """approved/edited TC를 Playwright로 실행. result/actual/exec_confidence 채움.
 
     Args:
-        headless: False면 별도 Chromium 창이 떠 사용자가 동작을 볼 수 있음.
+        headless:   False면 별도 Chromium 창이 떠 사용자가 동작을 볼 수 있음.
         slow_mo_ms: 액션 사이 인공 지연 (ms). 헤드풀 모드에서 동작을 천천히 보기 위함.
+        is_paused:  매 TC 시작 전 호출, True면 False가 될 때까지 대기 (협력적 일시정지).
+        is_stopped: 매 TC 시작 전 호출, True면 즉시 종료 (협력적 중단).
     """
     def _cb(msg: str):
         if progress_cb:
             progress_cb(msg)
+
+    def _wait_if_paused() -> bool:
+        """일시정지/중단 신호를 협력적으로 처리. 중단되면 True 반환."""
+        if is_stopped and is_stopped():
+            return True
+        if is_paused and is_paused():
+            import time as _t
+            _cb("⏸  사용자가 일시정지함 — 재개를 기다립니다…")
+            while is_paused():
+                if is_stopped and is_stopped():
+                    return True
+                _t.sleep(0.3)
+            _cb("▶  실행 재개")
+        return False
 
     runnable = [tc for tc in tcs if tc.get("review_status") in ("approved", "edited")]
     mode_label = "헤드풀 (브라우저 표시)" if not headless else "헤드리스"
@@ -75,6 +93,10 @@ def execute(
 
             _cb(f"  [D40] TC 실행 시작")
             for i, tc in enumerate(runnable, 1):
+                # 일시정지/중단 협력적 체크 (매 TC 시작 전)
+                if _wait_if_paused():
+                    _cb(f"⏹  사용자가 중단 요청 — {i-1}/{len(runnable)}개 실행 후 종료")
+                    break
                 _cb(f"  실행 ({i}/{len(runnable)}): {tc['tc_id']} [{tc.get('소분류','')}]")
                 gb_execute_tc(page, tc, base_url, fixtures, cb=_cb)
 
@@ -82,6 +104,9 @@ def execute(
             # fallback: 기존 shallow 실행
             _cb("  [D39] 기본 엔진으로 실행 (소분류 필드 없음)")
             for i, tc in enumerate(runnable, 1):
+                if _wait_if_paused():
+                    _cb(f"⏹  사용자가 중단 요청 — {i-1}/{len(runnable)}개 실행 후 종료")
+                    break
                 _cb(f"  실행 중 ({i}/{len(runnable)}): {tc['tc_id']}")
                 _run_tc(page, tc, base_url)
 
