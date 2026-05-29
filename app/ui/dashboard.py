@@ -62,6 +62,45 @@ class Dashboard(QMainWindow):
         self._build_ui()
         self._load_runs()
 
+        # 자동 새로고침 (10초마다) — 백그라운드 실행 중인 run의 stage 갱신
+        from PySide6.QtCore import QTimer
+        self._auto_refresh_timer = QTimer(self)
+        self._auto_refresh_timer.setInterval(10_000)   # 10초
+        self._auto_refresh_timer.timeout.connect(self._auto_refresh_runs)
+        self._auto_refresh_timer.start()
+
+    def _auto_refresh_runs(self) -> None:
+        """런닝 중인 run이 있을 때만 새로고침 (UX/성능 절충).
+
+        모든 run이 종료(stage=done) 상태면 굳이 갱신할 필요 없음.
+        """
+        try:
+            # 빠른 검사: meta.json들을 살펴서 진행 중인 게 있는지
+            in_progress = False
+            if RUNS_DIR.exists():
+                for run_dir in RUNS_DIR.iterdir():
+                    if not run_dir.is_dir():
+                        continue
+                    meta = run_dir / "meta.json"
+                    if not meta.exists():
+                        continue
+                    try:
+                        m = json.loads(meta.read_text(encoding="utf-8"))
+                        st = (m.get("stage") or "").lower()
+                        if st and st not in ("done", "error", "started"):
+                            # started는 거의 즉시 다른 단계로 넘어가니까 추적용으로 포함
+                            in_progress = True
+                            break
+                        if st == "started":
+                            in_progress = True
+                            break
+                    except Exception:
+                        continue
+            if in_progress:
+                self._load_runs()
+        except Exception:
+            pass
+
     # ── UI 구성 ──────────────────────────────────────────────────────────
     def _build_ui(self) -> None:
         central = QWidget()

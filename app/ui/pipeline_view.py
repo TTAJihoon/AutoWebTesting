@@ -6,12 +6,15 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QFont, QColor, QTextCursor, QTextBlockFormat, QFontMetrics
+from PySide6.QtGui import (
+    QFont, QColor, QTextCursor, QTextBlockFormat, QFontMetrics, QIcon,
+)
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFrame,
     QLabel, QPushButton, QPlainTextEdit, QLineEdit,
     QSplitter, QTableWidget, QTableWidgetItem, QHeaderView,
-    QMessageBox, QStatusBar, QFileDialog, QDialog,
+    QMessageBox, QStatusBar, QFileDialog, QDialog, QSystemTrayIcon,
+    QApplication, QStyle,
 )
 
 from app.core.orchestrator import Orchestrator, RunConfig
@@ -174,6 +177,20 @@ class PipelineView(QMainWindow):
         self._log_signal.connect(self._append_log)
         self._raw_log_signal.connect(self._append_raw_log)
         self._write_meta("started")
+
+        # 시스템 트레이 알림 (Stage 5/7 완료 / 오류 발생 시 OS 알림)
+        self._tray: QSystemTrayIcon | None = None
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            try:
+                self._tray = QSystemTrayIcon(self)
+                # 시스템 기본 정보 아이콘 사용 (별도 리소스 의존 X)
+                self._tray.setIcon(
+                    self.style().standardIcon(QStyle.SP_ComputerIcon)
+                )
+                self._tray.setToolTip(f"AWT — {config.run_id}")
+                self._tray.show()
+            except Exception:
+                self._tray = None
 
     # ── UI 구성 ───────────────────────────────────────────────────────────────
     def _build_ui(self) -> None:
@@ -725,6 +742,10 @@ class PipelineView(QMainWindow):
         )
         self._status_lbl.setText(text)
 
+        # 윈도우 타이틀에도 상태 반영 → 작업표시줄에서 진행 상태 보임
+        run_id = self._config.run_id
+        self.setWindowTitle(f"AWT — {run_id}  ·  {text}")
+
         # running 추론: 텍스트에 "중" 포함 또는 명시적 True
         if running is None:
             running = ("중" in text) and not ("완료" in text)
@@ -849,6 +870,11 @@ class PipelineView(QMainWindow):
         self._write_meta("stage3_done")
         self._set_status(f"Stage 3 완료  |  TC {len(tcs)}개", active=True)
         self._append_log(f"Stage 3 완료 - TC {len(tcs)}개. Reviewer Gate를 진행하세요.")
+        # 사용자 검토 대기 — 알림으로 인지
+        self._notify(
+            "AWT — 검토가 필요합니다",
+            f"TC {len(tcs)}개 설계 완료. Reviewer Gate를 진행하세요.",
+        )
 
     # ── Stage 4 Gate ─────────────────────────────────────────────────────────
     def _open_gate(self) -> None:
@@ -936,6 +962,14 @@ class PipelineView(QMainWindow):
         self._set_status(
             f"완료  |  통과 {passed}  실패 {failed}  /  총 {total}개", active=True
         )
+
+        # 시스템 트레이 알림 (사용자가 다른 작업 중이어도 인지 가능)
+        self._notify(
+            "AWT 실행 완료",
+            f"총 {total}개  ·  통과 {passed} / 실패 {failed}",
+            icon_type="warning" if failed > 0 else "info",
+        )
+
         QMessageBox.information(
             self, "실행 완료",
             f"tc_final.xlsx 생성 완료\n\n"
@@ -1054,7 +1088,38 @@ class PipelineView(QMainWindow):
             self._exec_btn.setEnabled(True)
         self._set_status("오류 발생")
         self._append_log(f"[오류]\n{msg}")
+        # 시스템 트레이 알림 (백그라운드 실행 중에도 인지 가능)
+        first_line = msg.splitlines()[0][:120] if msg else ""
+        self._notify("AWT — 오류 발생", first_line or "실행이 중단되었습니다", "critical")
         QMessageBox.critical(self, "오류", msg[:800])
+
+    # ── 시스템 트레이 알림 ────────────────────────────────────────────────
+    def _notify(
+        self,
+        title: str,
+        message: str,
+        icon_type: str = "info",   # info / warning / critical
+    ) -> None:
+        """OS 알림 표시 + 창이 비활성/최소화 상태면 작업표시줄 깜빡임."""
+        if self._tray is not None:
+            icon_map = {
+                "info":     QSystemTrayIcon.Information,
+                "warning":  QSystemTrayIcon.Warning,
+                "critical": QSystemTrayIcon.Critical,
+            }
+            try:
+                self._tray.showMessage(
+                    title, message,
+                    icon_map.get(icon_type, QSystemTrayIcon.Information),
+                    7000,
+                )
+            except Exception:
+                pass
+        # 백그라운드 창 알림 (작업표시줄 깜빡임)
+        try:
+            QApplication.alert(self, 0)
+        except Exception:
+            pass
 
     # ── TC 더블클릭 → 통합 상세 다이얼로그 ────────────────────────────────
     def _on_tc_double_clicked(self, row: int, _col: int) -> None:
@@ -1214,15 +1279,55 @@ class PipelineView(QMainWindow):
 
     # ── 메타 저장 ─────────────────────────────────────────────────────────────
     def _write_meta(self, stage: str) -> None:
+        """run의 진행 상태와 시험 환경을 meta.json에 기록.
+
+        박정훈(시험 인증)의 권고대로 재현·추적성에 필요한 정보를 모두 기록:
+          - 시험 환경 (headless / model / prompt 등)
+          - 사용된 캐시 정보 (URL → 출처 run)
+          - 분석에서 제외/실패한 leaf 정보
+          - 시간 정보 (시작/현재)
+        """
         try:
+            cfg = self._config
+            # 기존 meta 유지하면서 갱신 (started 시 created_at 같은 필드 보존)
+            meta_path = self._orch.run_dir / "meta.json"
+            prev: dict = {}
+            if meta_path.exists():
+                try:
+                    prev = json.loads(meta_path.read_text(encoding="utf-8"))
+                except Exception:
+                    prev = {}
+
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
             meta = {
-                "run_id":     self._config.run_id,
-                "target_url": self._config.target_url,
-                "stage":      stage,
-                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                **prev,
+                "run_id":         cfg.run_id,
+                "target_url":     cfg.target_url,
+                "stage":          stage,
+                "updated_at":     now_str,
+                # ── 시험 환경 (재현용) ─────────────────────────────────────
+                "model_override": cfg.model_override,
+                "headless_exec":  cfg.headless_exec,
+                "slow_mo_ms":     cfg.slow_mo_ms,
+                "max_leaves":     cfg.max_leaves,
+                "max_pages":      cfg.max_pages,
+                "inferred_threshold": cfg.inferred_threshold,
+                # ── 캐시 사용 (URL 목록만 기록) ─────────────────────────────
+                "dom_cache_used": list((cfg.cached_features or {}).keys()),
+                # ── 선택된 페이지 ───────────────────────────────────────────
+                "selected_urls":  cfg.selected_urls or [],
+                # ── 입력 파일 (이름만) ──────────────────────────────────────
+                "input_files":    [str(p) for p in (cfg.input_files or [])],
+                # ── 박정훈 추적성 권고: Stage 2에서 누락된 leaf 정보 ──────
+                "stage2_failed_leaves":   getattr(self._orch, "stage2_failed_leaves",   []),
+                "stage2_excluded_leaves": getattr(self._orch, "stage2_excluded_leaves", []),
             }
-            (self._orch.run_dir / "meta.json").write_text(
-                json.dumps(meta, ensure_ascii=False), encoding="utf-8"
+            if "created_at" not in meta:
+                meta["created_at"] = now_str
+
+            meta_path.write_text(
+                json.dumps(meta, ensure_ascii=False, indent=2),
+                encoding="utf-8",
             )
         except Exception:
             pass

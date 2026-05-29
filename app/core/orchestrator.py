@@ -111,6 +111,9 @@ class Orchestrator:
         # 협력적 일시정지/중단 플래그 (UI가 set, stage5가 read)
         self._paused  = False
         self._stopped = False
+        # 시험 추적성 정보 (박정훈 권고 — meta.json 보강용)
+        self.stage2_failed_leaves: list[dict] = []      # [{idx, name, reason}, ...]
+        self.stage2_excluded_leaves: list[dict] = []    # max_leaves cap으로 제외된 leaf
 
     # ── 일시정지/중단 ────────────────────────────────────────────────────
     def set_paused(self, paused: bool) -> None:
@@ -156,12 +159,17 @@ class Orchestrator:
     # ── Stage 2 ──────────────────────────────────────────────────────────
     def run_stage2(self) -> list[dict]:
         self._cb("▶ Stage 2: TC 설계")
+        # 추적성 정보를 받아둘 리스트 — 시험인증 보고서/메타에 기록
+        self.stage2_failed_leaves   = []
+        self.stage2_excluded_leaves = []
         self.tcs = stage2_tc_design.design(
             leaves=self.ingest_result["leaves"],
             manual_text=self.ingest_result["manual_text"],
             llm_client=self.llm,
             max_leaves=self.config.max_leaves,
             progress_cb=self._cb,
+            failed_leaves_out=self.stage2_failed_leaves,
+            excluded_leaves_out=self.stage2_excluded_leaves,
         )
         self._save_intermediate("tc_raw")
         self._stage = 2

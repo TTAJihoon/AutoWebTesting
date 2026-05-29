@@ -74,8 +74,15 @@ def design(
     defect_patterns: str = "",  # 하위 호환 (사용 안 함, 자산에서 로드)
     max_leaves: int = 0,        # 0 = 무제한; >0이면 신뢰도 우선으로 상위 N개만 처리
     progress_cb: Callable[[str], None] | None = None,
+    failed_leaves_out: list[dict] | None = None,    # 추적성용: 실패한 leaf 정보 기록처
+    excluded_leaves_out: list[dict] | None = None,  # 추적성용: max_leaves cap으로 제외된 leaf
 ) -> list[dict]:
-    """모든 leaf에 대해 TC를 생성해 단일 리스트로 반환."""
+    """모든 leaf에 대해 TC를 생성해 단일 리스트로 반환.
+
+    Args:
+        failed_leaves_out:   리스트 전달 시 분석 실패한 leaf의 {idx, name, reason}을 append.
+        excluded_leaves_out: 리스트 전달 시 max_leaves cap으로 잘린 leaf의 {idx, name, confidence}을 append.
+    """
     def _cb(msg: str):
         if progress_cb:
             progress_cb(msg)
@@ -85,6 +92,8 @@ def design(
 
     # ── 안전 가드 (C): max_leaves=0(무제한)인데 leaves가 너무 많으면 자동 제한 ──
     SAFETY_CAP = 100
+    leaves_before_cap = list(leaves)   # 추적성: 제외된 leaf 식별용 원본 보관
+
     if max_leaves <= 0 and original_count > SAFETY_CAP:
         leaves = _prioritize_leaves(leaves, SAFETY_CAP)
         _cb(
@@ -98,6 +107,18 @@ def design(
                 f"TC 설계 대상 leaf {original_count}개 → 상위 {len(leaves)}개로 제한 "
                 f"(max_leaves={max_leaves}; 해제하려면 설정에서 0으로 변경)"
             )
+
+    # 추적성: max_leaves cap으로 제외된 leaf 목록 기록
+    if excluded_leaves_out is not None and len(leaves) < len(leaves_before_cap):
+        included_names = {lf.get("category_leaf") for lf in leaves}
+        for i, lf in enumerate(leaves_before_cap, 1):
+            if lf.get("category_leaf") not in included_names:
+                excluded_leaves_out.append({
+                    "idx":        i,
+                    "name":       lf.get("category_leaf", ""),
+                    "confidence": str(lf.get("confidence", "")),
+                    "source_url": lf.get("source_url", ""),
+                })
 
     # 제품 유형 분류 (전체 매뉴얼 기준)
     product_type_ids = classify_product_types(manual_text)
@@ -135,6 +156,12 @@ def design(
         except Exception as e:
             err_msg = str(e).splitlines()[0][:200]
             failed_leaves.append((leaf_idx, leaf["category_leaf"], err_msg))
+            if failed_leaves_out is not None:
+                failed_leaves_out.append({
+                    "idx":    leaf_idx,
+                    "name":   leaf.get("category_leaf", ""),
+                    "reason": err_msg,
+                })
             _cb(
                 f"⚠ leaf 분석 실패 ({leaf_idx}/{len(leaves)}): "
                 f"{leaf['category_leaf']} — {err_msg}"
