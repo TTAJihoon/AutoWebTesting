@@ -1,0 +1,396 @@
+"""페이지 선택 다이얼로그 — Stage 1~3 실행 전에 URL 수집·선택·캐시 표시.
+
+흐름:
+    1. 다이얼로그 오픈 → 백그라운드 thread로 BFS URL 수집
+    2. 수집 완료 시 테이블 채움
+    3. 캐시 검색 (같은 target_url의 최근 run) → 캐시 있는 행 자동 체크 + ♻ 표시
+    4. 사용자 체크 조정 후 "DOM 분석 시작" 클릭
+    5. 반환: (selected_urls, cached_features_for_those)
+"""
+from __future__ import annotations
+from pathlib import Path
+
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSpinBox,
+    QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
+    QProgressBar, QFrame, QCheckBox,
+)
+
+
+# ── BFS 워커 ─────────────────────────────────────────────────────────────────
+class _CollectWorker(QThread):
+    """백그라운드 BFS — UI 블로킹 방지."""
+
+    progress = Signal(str)
+    finished_ok = Signal(list)        # list[dict] {url, title, depth}
+    error    = Signal(str)
+
+    def __init__(
+        self,
+        start_url: str,
+        max_pages: int,
+        max_depth: int,
+        auth_sequence: list[dict] | None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self._start_url     = start_url
+        self._max_pages     = max_pages
+        self._max_depth     = max_depth
+        self._auth_sequence = auth_sequence
+
+    def run(self) -> None:
+        try:
+            from app.core.stage0_url_collect import collect_urls
+            urls = collect_urls(
+                start_url=self._start_url,
+                max_pages=self._max_pages,
+                max_depth=self._max_depth,
+                auth_sequence=self._auth_sequence,
+                progress_cb=self.progress.emit,
+            )
+            self.finished_ok.emit(urls)
+        except Exception as e:
+            import traceback
+            self.error.emit(f"{e}\n\n{traceback.format_exc()}")
+
+
+# ── 메인 다이얼로그 ─────────────────────────────────────────────────────────
+class PagePickerDialog(QDialog):
+    """선택된 URL과 캐시 features를 반환."""
+
+    def __init__(
+        self,
+        start_url: str,
+        auth_sequence: list[dict] | None = None,
+        exclude_run_id: str | None = None,
+        default_max_pages: int = 30,
+        default_max_depth: int = 2,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("페이지 선택 — 분석할 페이지를 고르세요")
+        self.resize(900, 640)
+        self.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
+
+        self._start_url     = start_url
+        self._auth_sequence = auth_sequence or []
+        self._exclude_run_id = exclude_run_id
+
+        # 결과
+        self._urls: list[dict] = []
+        self._cached_features: dict[str, list[dict]] = {}
+        self._cache_run_dir: Path | None = None
+
+        # 노출용 결과
+        self.selected_urls: list[str] = []
+        self.selected_cache: dict[str, list[dict]] = {}
+
+        self._worker: _CollectWorker | None = None
+        self._build_ui(default_max_pages, default_max_depth)
+
+    # ── UI ───────────────────────────────────────────────────────────────
+    def _build_ui(self, max_pages: int, max_depth: int) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(10)
+
+        # 상단 안내
+        hdr = QLabel(
+            f"<b style='font-size:14px; color:#1e293b;'>대상 URL :</b> "
+            f"<span style='color:#475569;'>{self._start_url}</span>"
+        )
+        root.addWidget(hdr)
+
+        hint = QLabel(
+            "🔍  BFS로 URL 목록을 수집한 후 분석할 페이지를 체크하세요. "
+            "♻ 표시된 페이지는 과거 분석 결과를 재사용하여 시간을 절약합니다."
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet(
+            "QLabel { background:#e8f4fd; color:#0066cc; padding:8px;"
+            " border-radius:4px; font-size:12px; }"
+        )
+        root.addWidget(hint)
+
+        # 옵션 행 (max_pages / max_depth / 시작)
+        opt_row = QHBoxLayout()
+        opt_row.setSpacing(8)
+
+        opt_row.addWidget(QLabel("최대 페이지:"))
+        self._max_pages_spin = QSpinBox()
+        self._max_pages_spin.setRange(1, 500)
+        self._max_pages_spin.setValue(max_pages)
+        self._max_pages_spin.setFixedWidth(80)
+        opt_row.addWidget(self._max_pages_spin)
+
+        opt_row.addSpacing(10)
+        opt_row.addWidget(QLabel("BFS 깊이:"))
+        self._max_depth_spin = QSpinBox()
+        self._max_depth_spin.setRange(0, 5)
+        self._max_depth_spin.setValue(max_depth)
+        self._max_depth_spin.setFixedWidth(60)
+        opt_row.addWidget(self._max_depth_spin)
+
+        opt_row.addSpacing(16)
+        self._collect_btn = QPushButton("URL 수집 시작")
+        self._collect_btn.clicked.connect(self._start_collect)
+        opt_row.addWidget(self._collect_btn)
+
+        self._stop_btn = QPushButton("중단")
+        self._stop_btn.setEnabled(False)
+        self._stop_btn.clicked.connect(self._stop_collect)
+        opt_row.addWidget(self._stop_btn)
+
+        opt_row.addStretch()
+        root.addLayout(opt_row)
+
+        # 진행률
+        self._progress = QProgressBar()
+        self._progress.setRange(0, 0)
+        self._progress.setVisible(False)
+        self._progress.setFixedHeight(6)
+        root.addWidget(self._progress)
+
+        # 진행 메시지 라벨
+        self._status_lbl = QLabel("")
+        self._status_lbl.setStyleSheet("QLabel { color:#64748b; font-size:11px; }")
+        self._status_lbl.setWordWrap(True)
+        root.addWidget(self._status_lbl)
+
+        # 일괄 선택 버튼들
+        bulk_row = QHBoxLayout()
+        bulk_row.setSpacing(6)
+        for label, handler in [
+            ("전체 선택",    self._select_all),
+            ("선택 해제",    self._deselect_all),
+            ("캐시만 선택",   self._select_cached_only),
+            ("미캐시만 선택", self._select_uncached_only),
+        ]:
+            b = QPushButton(label)
+            b.setFixedHeight(28)
+            b.clicked.connect(handler)
+            bulk_row.addWidget(b)
+        bulk_row.addStretch()
+
+        self._count_lbl = QLabel("선택: 0 / 0")
+        self._count_lbl.setStyleSheet(
+            "QLabel { background:#f1f5f9; color:#1e293b;"
+            " border:1px solid #e2e8f0; border-radius:4px;"
+            " padding:4px 10px; font-weight:600; font-size:12px; }"
+        )
+        bulk_row.addWidget(self._count_lbl)
+        root.addLayout(bulk_row)
+
+        # 테이블
+        self._table = QTableWidget(0, 5)
+        self._table.setHorizontalHeaderLabels(["선택", "URL", "제목", "깊이", "캐시"])
+        self._table.verticalHeader().setVisible(False)
+        self._table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self._table.setSelectionBehavior(QTableWidget.SelectRows)
+        hh = self._table.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.Fixed)
+        hh.setSectionResizeMode(1, QHeaderView.Stretch)
+        hh.setSectionResizeMode(2, QHeaderView.Interactive)
+        hh.setSectionResizeMode(3, QHeaderView.Fixed)
+        hh.setSectionResizeMode(4, QHeaderView.Fixed)
+        self._table.setColumnWidth(0, 48)
+        self._table.setColumnWidth(2, 260)
+        self._table.setColumnWidth(3, 50)
+        self._table.setColumnWidth(4, 80)
+        self._table.itemChanged.connect(self._on_item_changed)
+        root.addWidget(self._table, 1)
+
+        # 하단 버튼
+        btn_row = QHBoxLayout()
+        cancel_btn = QPushButton("취소")
+        cancel_btn.clicked.connect(self.reject)
+        self._ok_btn = QPushButton("✅  DOM 분석 시작")
+        self._ok_btn.setEnabled(False)
+        self._ok_btn.clicked.connect(self._on_accept)
+        btn_row.addStretch()
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(self._ok_btn)
+        root.addLayout(btn_row)
+
+        # 자동 시작
+        self._start_collect()
+
+    # ── BFS 워커 시작/중단 ────────────────────────────────────────────────
+    def _start_collect(self) -> None:
+        if self._worker is not None and self._worker.isRunning():
+            return
+        self._collect_btn.setEnabled(False)
+        self._stop_btn.setEnabled(True)
+        self._progress.setVisible(True)
+        self._table.setRowCount(0)
+        self._urls = []
+        self._cached_features = {}
+        self._cache_run_dir = None
+        self._refresh_count()
+        self._ok_btn.setEnabled(False)
+
+        self._worker = _CollectWorker(
+            start_url=self._start_url,
+            max_pages=self._max_pages_spin.value(),
+            max_depth=self._max_depth_spin.value(),
+            auth_sequence=self._auth_sequence,
+            parent=self,
+        )
+        self._worker.progress.connect(self._on_progress)
+        self._worker.finished_ok.connect(self._on_collect_done)
+        self._worker.error.connect(self._on_collect_error)
+        self._worker.start()
+
+    def _stop_collect(self) -> None:
+        if self._worker and self._worker.isRunning():
+            # Qt thread는 강제 terminate가 위험하므로 사용자에게 알림 (실제 BFS는 곧 끝남)
+            self._status_lbl.setText("중단 요청됨 — 현재 페이지 완료 후 종료됩니다")
+            self._worker.requestInterruption()
+        self._stop_btn.setEnabled(False)
+
+    def _on_progress(self, msg: str) -> None:
+        self._status_lbl.setText(msg)
+
+    def _on_collect_done(self, urls: list[dict]) -> None:
+        self._urls = urls or []
+        self._collect_btn.setEnabled(True)
+        self._stop_btn.setEnabled(False)
+        self._progress.setVisible(False)
+
+        # 캐시 검색
+        from app.core.dom_cache import cache_status_for_urls
+        cache_map, cache_run = cache_status_for_urls(
+            target_url=self._start_url,
+            page_urls=[u["url"] for u in self._urls],
+            exclude_run_id=self._exclude_run_id,
+        )
+        self._cached_features = cache_map
+        self._cache_run_dir    = cache_run
+
+        self._populate_table()
+
+        msg = f"URL 수집 완료 — {len(self._urls)}개"
+        if cache_run:
+            msg += f"  |  ♻ 캐시 매칭 {len(cache_map)}개 (소스: {cache_run.name})"
+        self._status_lbl.setText(msg)
+        self._ok_btn.setEnabled(bool(self._urls))
+
+    def _on_collect_error(self, err: str) -> None:
+        self._collect_btn.setEnabled(True)
+        self._stop_btn.setEnabled(False)
+        self._progress.setVisible(False)
+        self._status_lbl.setText("URL 수집 실패")
+        QMessageBox.critical(self, "URL 수집 오류", err[:1000])
+
+    # ── 테이블 ──────────────────────────────────────────────────────────
+    def _populate_table(self) -> None:
+        self._table.blockSignals(True)
+        try:
+            self._table.setRowCount(0)
+            for entry in self._urls:
+                url   = entry["url"]
+                title = entry["title"]
+                depth = entry["depth"]
+                has_cache = url in self._cached_features
+
+                r = self._table.rowCount()
+                self._table.insertRow(r)
+
+                # 0: 체크박스
+                chk = QTableWidgetItem()
+                chk.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable)
+                # 캐시 있는 페이지는 자동 체크 (재사용 권장)
+                chk.setCheckState(Qt.Checked if has_cache else Qt.Unchecked)
+                chk.setTextAlignment(Qt.AlignCenter)
+                self._table.setItem(r, 0, chk)
+
+                # 1: URL
+                self._table.setItem(r, 1, QTableWidgetItem(url))
+                # 2: 제목
+                self._table.setItem(r, 2, QTableWidgetItem(title))
+                # 3: 깊이
+                d_item = QTableWidgetItem(str(depth))
+                d_item.setTextAlignment(Qt.AlignCenter)
+                self._table.setItem(r, 3, d_item)
+                # 4: 캐시
+                if has_cache:
+                    n_feats = len(self._cached_features[url])
+                    cache_item = QTableWidgetItem(f"♻ {n_feats}개")
+                    cache_item.setForeground(Qt.darkGreen)
+                else:
+                    cache_item = QTableWidgetItem("—")
+                    cache_item.setForeground(Qt.gray)
+                cache_item.setTextAlignment(Qt.AlignCenter)
+                self._table.setItem(r, 4, cache_item)
+        finally:
+            self._table.blockSignals(False)
+        self._refresh_count()
+
+    def _on_item_changed(self, _item) -> None:
+        self._refresh_count()
+
+    def _refresh_count(self) -> None:
+        total = self._table.rowCount()
+        sel = sum(
+            1 for r in range(total)
+            if self._table.item(r, 0) and self._table.item(r, 0).checkState() == Qt.Checked
+        )
+        n_cache = sum(
+            1 for r in range(total)
+            if self._table.item(r, 0)
+            and self._table.item(r, 0).checkState() == Qt.Checked
+            and self._table.item(r, 1)
+            and self._table.item(r, 1).text() in self._cached_features
+        )
+        n_llm = sel - n_cache
+        self._count_lbl.setText(
+            f"선택: {sel} / {total}  |  ♻ 캐시 {n_cache}  +  🆕 LLM {n_llm}"
+        )
+
+    # ── 일괄 선택 ────────────────────────────────────────────────────────
+    def _set_all_checks(self, predicate) -> None:
+        self._table.blockSignals(True)
+        try:
+            for r in range(self._table.rowCount()):
+                url_item = self._table.item(r, 1)
+                if not url_item:
+                    continue
+                state = Qt.Checked if predicate(url_item.text()) else Qt.Unchecked
+                self._table.item(r, 0).setCheckState(state)
+        finally:
+            self._table.blockSignals(False)
+        self._refresh_count()
+
+    def _select_all(self) -> None:
+        self._set_all_checks(lambda u: True)
+
+    def _deselect_all(self) -> None:
+        self._set_all_checks(lambda u: False)
+
+    def _select_cached_only(self) -> None:
+        self._set_all_checks(lambda u: u in self._cached_features)
+
+    def _select_uncached_only(self) -> None:
+        self._set_all_checks(lambda u: u not in self._cached_features)
+
+    # ── 확인 ────────────────────────────────────────────────────────────
+    def _on_accept(self) -> None:
+        sel_urls: list[str] = []
+        for r in range(self._table.rowCount()):
+            chk = self._table.item(r, 0)
+            url_item = self._table.item(r, 1)
+            if chk and url_item and chk.checkState() == Qt.Checked:
+                sel_urls.append(url_item.text())
+
+        if not sel_urls:
+            QMessageBox.warning(self, "선택 없음", "최소 1개 페이지를 선택하세요.")
+            return
+
+        self.selected_urls  = sel_urls
+        self.selected_cache = {
+            u: self._cached_features[u]
+            for u in sel_urls if u in self._cached_features
+        }
+        self.accept()

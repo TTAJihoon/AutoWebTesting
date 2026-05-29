@@ -62,8 +62,16 @@ def scan(
     auth_sequence: list[dict] | None = None,
     max_pages: int = 30,
     progress_cb: Callable[[str], None] | None = None,
+    selected_urls: list[str] | None = None,
+    cached_features: dict[str, list[dict]] | None = None,
 ) -> dict:
     """URL을 스캔해 feature-spec-draft.md 생성. LLM 명세 초안 반환.
+
+    Args:
+        url:             시작 URL (BFS 기준)
+        max_pages:       BFS 최대 페이지 수 (selected_urls가 있으면 무시)
+        selected_urls:   None이면 기존 BFS 방식. 리스트면 그 URL만 처리(BFS 생략).
+        cached_features: {url: [features...]} — 이 URL은 LLM 호출 생략, 캐시 features 그대로 사용.
 
     Raises:
         RuntimeError: 모든 페이지 스캔 후 features가 0개인 경우
@@ -79,6 +87,9 @@ def scan(
     visited: set[str] = set()
     llm_error_count = 0          # LLM 호출 실패 누적
     llm_call_count  = 0          # LLM 호출 성공 누적
+    cache_hit_count = 0          # 캐시 재사용 페이지 수
+
+    cached_features = cached_features or {}
 
     def _cb(msg: str):
         if progress_cb:
@@ -103,20 +114,45 @@ def scan(
                     page.wait_for_load_state("networkidle", timeout=10000)
             _cb("인증 완료")
 
-        # BFS 페이지 수집 (depth ≤ 2)
-        queue = [(url, 0)]
-        while queue and len(visited) < max_pages:
+        # ── 페이지 큐 결정 ────────────────────────────────────────────────────
+        # selected_urls가 주어지면 그것만 처리(BFS 생략), 아니면 기존 BFS
+        if selected_urls is not None:
+            queue: list[tuple[str, int]] = [(u, 0) for u in selected_urls]
+            do_bfs = False
+            total_pages = len(selected_urls)
+        else:
+            queue = [(url, 0)]
+            do_bfs = True
+            total_pages = max_pages
+
+        while queue and len(visited) < total_pages:
             cur_url, depth = queue.pop(0)
             if cur_url in visited:
                 continue
             visited.add(cur_url)
+
+            # ── 캐시 hit: LLM 호출 생략 ────────────────────────────────────
+            if cur_url in cached_features:
+                cached = cached_features[cur_url]
+                # 캐시된 feature를 그대로 추가 (source_url 보존)
+                for feat in cached:
+                    f = dict(feat)
+                    f.setdefault("source_url", cur_url)
+                    all_features.append(f)
+                cache_hit_count += 1
+                page_idx = len(visited)
+                _cb(
+                    f"♻ 캐시 재사용 ({page_idx}/{total_pages}): "
+                    f"{cur_url} — 기능 {len(cached)}개"
+                )
+                continue
 
             try:
                 if cur_url != page.url:
                     page.goto(cur_url, wait_until="networkidle", timeout=20000)
 
                 page_idx = len(visited)
-                _cb(f"스캔 중 ({page_idx}/{max_pages}): {cur_url}")
+                _cb(f"스캔 중 ({page_idx}/{total_pages}): {cur_url}")
 
                 # ── 스크린샷 저장 ────────────────────────────────────────────
                 screenshot_name = f"page_{page_idx:03d}_{_safe_filename(cur_url, url)}.png"
@@ -155,6 +191,7 @@ def scan(
                             feats = result.get("features", [])
                             for feat in feats:
                                 feat["screenshot_file"] = screenshot_name
+                                feat["source_url"]      = cur_url   # URL별 캐시용
                             all_features.extend(feats)
                             page_feature_count += len(feats)
                             if not feats:
@@ -176,8 +213,8 @@ def scan(
 
                 _cb(f"  페이지 기능 {page_feature_count}개 추출")
 
-                # 같은 origin 링크 수집 (depth+1)
-                if depth < 2:
+                # 같은 origin 링크 수집 (depth+1) — selected_urls 모드에서는 생략
+                if do_bfs and depth < 2:
                     links = page.evaluate(
                         "() => [...document.querySelectorAll('a[href]')].map(a=>a.href)"
                     )
@@ -197,6 +234,7 @@ def scan(
         "features":      all_features,
         "llm_calls":     llm_call_count,
         "llm_errors":    llm_error_count,
+        "cache_hits":    cache_hit_count,
     }
     spec_path = out_dir / "feature-spec-draft.json"
     spec_path.write_text(json.dumps(draft, ensure_ascii=False, indent=2), encoding="utf-8")

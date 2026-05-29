@@ -36,6 +36,15 @@ class RunConfig:
     """Contract frontmatter 모델을 이 모델로 교체. 예: 'gemini-2.5-flash'.
     None이면 각 Contract의 model 그대로 사용."""
 
+    selected_urls: list[str] | None = None
+    """페이지 선택 다이얼로그에서 선택된 URL 목록. None이면 BFS 전체."""
+
+    cached_features: dict[str, list[dict]] | None = None
+    """URL → features 캐시 (과거 run에서 복사). 해당 URL은 LLM 호출 생략."""
+
+    max_pages: int = 30
+    """BFS 최대 페이지 수 (selected_urls가 있으면 무시됨)."""
+
 
 class Orchestrator:
     """AWT Stage 0~7 실행 제어."""
@@ -77,7 +86,10 @@ class Orchestrator:
             llm_client=self.llm,
             run_dir=self.run_dir,
             auth_sequence=self.config.auth_sequence or None,
+            max_pages=self.config.max_pages,
             progress_cb=self._cb,
+            selected_urls=self.config.selected_urls,
+            cached_features=self.config.cached_features,
         )
         self._stage = 0
         return result

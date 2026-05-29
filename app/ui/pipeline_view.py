@@ -6,12 +6,12 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtGui import QFont, QColor, QTextCursor, QTextBlockFormat, QFontMetrics
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFrame,
     QLabel, QPushButton, QPlainTextEdit,
     QSplitter, QTableWidget, QTableWidgetItem, QHeaderView,
-    QMessageBox, QStatusBar, QFileDialog,
+    QMessageBox, QStatusBar, QFileDialog, QDialog,
 )
 
 from app.core.orchestrator import Orchestrator, RunConfig
@@ -65,6 +65,24 @@ _CARD = (
     "QFrame { background-color: #ffffff; border-radius: 8px;"
     " border: 1px solid #e2e8f0; }"
 )
+
+
+# ── Stage 원형 — 클릭 가능 라벨 ────────────────────────────────────────────────
+class _StageCircle(QLabel):
+    """Stage 진행 원. 클릭 시 stage 번호와 함께 시그널 발사."""
+    clicked = Signal(int)
+
+    def __init__(self, stage_num: int, parent=None):
+        super().__init__(str(stage_num), parent)
+        self._stage_num = stage_num
+        self.setAlignment(Qt.AlignCenter)
+        self.setFixedSize(32, 32)
+        # 커서는 _update_circles에서 진행 상태에 따라 동적 설정 (초기엔 기본 화살표)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit(self._stage_num)
+        super().mousePressEvent(event)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -200,14 +218,16 @@ class PipelineView(QMainWindow):
         prog_lay = QHBoxLayout(prog_card)
         prog_lay.setContentsMargins(32, 0, 32, 0)
 
-        self._circles: list[QLabel] = []
+        self._circles: list[_StageCircle] = []
         self._lines:   list[QFrame] = []
+        # 진행했던 최대 stage 번호 — 클릭으로 과거/현재 stage 보기 위함
+        self._max_progress: int = 0
 
         for i in range(1, 8):
-            circle = QLabel(str(i))
-            circle.setAlignment(Qt.AlignCenter)
-            circle.setFixedSize(32, 32)
+            circle = _StageCircle(i)
             circle.setStyleSheet(_CIRCLE_FUTURE)
+            circle.clicked.connect(self._on_stage_circle_clicked)
+            circle.setToolTip(f"Stage {i} 보기 (진행한 단계만 클릭 가능)")
             self._circles.append(circle)
             prog_lay.addWidget(circle)
             if i < 7:
@@ -306,7 +326,7 @@ class PipelineView(QMainWindow):
         bot_lay.setContentsMargins(16, 0, 16, 0)
         bot_lay.setSpacing(12)
 
-        # 왼쪽: 상태 인디케이터
+        # 왼쪽: 상태 인디케이터 (점 + 텍스트) + 회전 스피너 + 경과시간
         self._dot = QLabel()
         self._dot.setFixedSize(8, 8)
         self._dot.setStyleSheet(
@@ -317,9 +337,33 @@ class PipelineView(QMainWindow):
             "QLabel { background: transparent; border: none;"
             " font-size: 13px; font-weight: 600; color: #334155; }"
         )
+        # 회전 스피너 (실행 중에만 표시) — 유니코드 ⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ 회전
+        self._spinner_lbl = QLabel("")
+        self._spinner_lbl.setFixedWidth(18)
+        self._spinner_lbl.setStyleSheet(
+            "QLabel { background: transparent; border: none;"
+            " font-size: 14px; color: #3b82f6; font-weight: 700; }"
+        )
+        # 경과시간 라벨
+        self._elapsed_lbl = QLabel("")
+        self._elapsed_lbl.setStyleSheet(
+            "QLabel { background: transparent; border: none;"
+            " font-size: 12px; color: #64748b; font-family: Consolas, monospace; }"
+        )
         bot_lay.addWidget(self._dot)
         bot_lay.addWidget(self._status_lbl)
+        bot_lay.addWidget(self._spinner_lbl)
+        bot_lay.addWidget(self._elapsed_lbl)
         bot_lay.addStretch()
+
+        # 스피너·경과시간 타이머 (실행 중에만 활성)
+        from PySide6.QtCore import QTimer
+        self._spinner_frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+        self._spinner_idx    = 0
+        self._spinner_timer  = QTimer(self)
+        self._spinner_timer.setInterval(120)
+        self._spinner_timer.timeout.connect(self._tick_spinner)
+        self._elapsed_start: float | None = None
 
         # Stage 5~7 대기/실행 버튼 (Stage 3 완료 후 표시)
         self._exec_btn = QPushButton("Stage 5~7 대기")
@@ -413,6 +457,9 @@ class PipelineView(QMainWindow):
     # ── Stage 진행 표시기 ─────────────────────────────────────────────────────
     def _update_circles(self, progress: int, badge: str = "") -> None:
         """progress = 현재 활성 stage 번호(1~7). 1..progress-1=완료, progress=활성, 이후=대기."""
+        # 진행한 최대 stage 번호 기록 (클릭 이동 시 허용 범위 결정에 사용)
+        if progress > self._max_progress:
+            self._max_progress = progress
         for i, circle in enumerate(self._circles):
             n = i + 1
             if n < progress:
@@ -421,22 +468,143 @@ class PipelineView(QMainWindow):
                 circle.setStyleSheet(_CIRCLE_CURRENT)
             else:
                 circle.setStyleSheet(_CIRCLE_FUTURE)
+            # 진행한 단계는 손가락 커서, 미래는 기본 커서
+            circle.setCursor(Qt.PointingHandCursor if n <= self._max_progress else Qt.ArrowCursor)
         for i, line in enumerate(self._lines):
             line.setStyleSheet(_LINE_DONE if (i + 1) < progress else _LINE_PENDING)
         if badge:
             self._stage_badge.setText(badge)
 
-    def _set_status(self, text: str, active: bool = False) -> None:
+    # ── Stage 원 클릭 — 과거 / 현재 단계로 이동 ─────────────────────────────
+    def _on_stage_circle_clicked(self, stage_num: int) -> None:
+        """클릭한 stage의 TC 스냅샷을 테이블에 표시. 진행 안 한 단계는 무시."""
+        if stage_num > self._max_progress:
+            self._append_log(f"Stage {stage_num}은 아직 진행되지 않았습니다.")
+            return
+
+        # stage → JSON 파일 매핑
+        snapshot_map = {
+            2: ("tc_raw.json",      "Stage 2 (TC 설계 직후)"),
+            3: ("tc_verified.json", "Stage 3 (V1~V5 검증 완료)"),
+            4: ("tc_gated.json",    "Stage 4 (Reviewer Gate 반영)"),
+            5: ("tc_executed.json", "Stage 5 (자동 실행 완료)"),
+            6: ("tc_executed.json", "Stage 6 (실패 원인 분석)"),
+            7: ("tc_executed.json", "Stage 7 (최종 Excel)"),
+        }
+        if stage_num == 1:
+            self._append_log("Stage 1은 파일 파싱 단계라 TC 스냅샷이 없습니다.")
+            return
+
+        fname, label = snapshot_map.get(stage_num, (None, ""))
+        path = self._orch.run_dir / fname if fname else None
+        if not path or not path.exists():
+            self._append_log(f"⚠ {label} 스냅샷 파일 없음 — 표시할 데이터가 없습니다.")
+            return
+
+        try:
+            import json as _json
+            tcs = _json.loads(path.read_text(encoding="utf-8"))
+            self._tcs = tcs
+            self._refresh_tc_table()
+            self._append_log(f"📂 {label} 스냅샷 표시 — TC {len(tcs)}개 ({fname})")
+        except Exception as e:
+            self._append_log(f"⚠ 스냅샷 로드 실패: {e}")
+
+    def _set_status(self, text: str, active: bool = False, running: bool | None = None) -> None:
+        """상태 표시 갱신.
+
+        active : True면 점이 녹색(완료/실행중), False면 회색(대기)
+        running: True/None  → 실행 중(스피너 + 경과시간 ON)
+                 False      → 정지/완료(스피너 OFF, 경과시간 멈춤)
+        """
         color = "#22c55e" if active else "#cbd5e1"
         self._dot.setStyleSheet(
             f"QLabel {{ border-radius: 4px; border: none; background: {color}; }}"
         )
         self._status_lbl.setText(text)
 
+        # running 추론: 텍스트에 "중" 포함 또는 명시적 True
+        if running is None:
+            running = ("중" in text) and not ("완료" in text)
+        if running:
+            self._start_spinner()
+        else:
+            self._stop_spinner()
+
+    # ── 스피너 / 경과시간 ─────────────────────────────────────────────────────
+    def _start_spinner(self) -> None:
+        import time as _t
+        if self._elapsed_start is None:
+            self._elapsed_start = _t.time()
+        if not self._spinner_timer.isActive():
+            self._spinner_timer.start()
+
+    def _stop_spinner(self) -> None:
+        if self._spinner_timer.isActive():
+            self._spinner_timer.stop()
+        self._spinner_lbl.setText("")
+        # 경과시간은 마지막 값으로 고정 (지우지 않음)
+        if self._elapsed_start is not None:
+            self._update_elapsed_text()
+        self._elapsed_start = None
+
+    def _tick_spinner(self) -> None:
+        import time as _t
+        # 스피너 프레임
+        self._spinner_idx = (self._spinner_idx + 1) % len(self._spinner_frames)
+        self._spinner_lbl.setText(self._spinner_frames[self._spinner_idx])
+        # 경과시간
+        if self._elapsed_start is not None:
+            self._update_elapsed_text()
+
+    def _update_elapsed_text(self) -> None:
+        import time as _t
+        if self._elapsed_start is None:
+            return
+        secs = int(_t.time() - self._elapsed_start)
+        h, rem = divmod(secs, 3600)
+        m, s   = divmod(rem, 60)
+        if h > 0:
+            self._elapsed_lbl.setText(f"⏱  {h}:{m:02d}:{s:02d}")
+        else:
+            self._elapsed_lbl.setText(f"⏱  {m:02d}:{s:02d}")
+
     # ── Stage 1~3 (Pre-Gate) ─────────────────────────────────────────────────
     def _start_pre_gate(self) -> None:
+        # ── 페이지 선택 다이얼로그 (Stage 0 BFS 수행 + URL 선택) ──────────
+        # Stage 0 DOM 스캔 건너뜀 옵션이 켜져 있으면 다이얼로그 생략 (파일만 사용)
+        from app.ui.page_picker import PagePickerDialog
+
+        skip_stage0 = (
+            not self._config.target_url
+            or self._config.target_url.lower().startswith("file://")
+        )
+        if not skip_stage0:
+            picker = PagePickerDialog(
+                start_url=self._config.target_url,
+                auth_sequence=self._config.auth_sequence or None,
+                exclude_run_id=self._config.run_id,
+                default_max_pages=self._config.max_pages or 30,
+                parent=self,
+            )
+            if picker.exec() != QDialog.Accepted:
+                # 사용자가 취소 → 실행 안 함
+                self._append_log("페이지 선택이 취소되었습니다. 실행을 시작하지 않습니다.")
+                return
+            # 선택 결과를 config에 반영
+            self._config.selected_urls   = picker.selected_urls
+            self._config.cached_features = picker.selected_cache
+
+            n_sel   = len(picker.selected_urls)
+            n_cache = len(picker.selected_cache)
+            n_llm   = n_sel - n_cache
+            self._append_log(
+                f"페이지 선택 완료 — 분석할 페이지 {n_sel}개 "
+                f"(♻ 캐시 재사용 {n_cache}개 + 🆕 LLM 분석 {n_llm}개)"
+            )
+
         self._run_btn.setEnabled(False)
-        self._log.clear()
+        # (페이지 선택 진행 로그를 보존하기 위해 self._log.clear() 호출하지 않음)
         self._update_circles(1, "Stage 1~3 실행 중")
         self._set_status("Stage 1~3 실행 중")
         self._append_log("Stage 1~3 시작...")
@@ -644,9 +812,32 @@ class PipelineView(QMainWindow):
 
     # ── UI 갱신 ───────────────────────────────────────────────────────────────
     def _append_log(self, msg: str) -> None:
-        ts   = datetime.now().strftime("%H:%M:%S")
-        line = f"[{ts}] {msg}"
-        self._log.appendPlainText(line)
+        """로그 한 줄 추가. word-wrap된 후속 줄도 시간 영역만큼 자동 들여쓰기."""
+        ts     = datetime.now().strftime("%H:%M:%S")
+        prefix = f"[{ts}] "
+        text   = prefix + (msg or "")
+
+        # 시간 영역 픽셀 너비 계산 → hanging indent
+        fm      = QFontMetrics(self._log.font())
+        indent  = fm.horizontalAdvance(prefix)
+
+        cursor = self._log.textCursor()
+        cursor.movePosition(QTextCursor.End)
+
+        # 첫 줄이 아니면 새 블록(=새 줄) 시작
+        if not self._log.document().isEmpty():
+            cursor.insertBlock()
+
+        # hanging indent: 좌측 여백 = indent, 첫 줄만 indent만큼 끌어옴
+        fmt = QTextBlockFormat()
+        fmt.setLeftMargin(indent)
+        fmt.setTextIndent(-indent)
+        cursor.setBlockFormat(fmt)
+
+        # \n으로 분리된 경우 각 줄을 같은 블록 안에 줄바꿈 문자로 넣음 → 동일 들여쓰기 적용
+        cursor.insertText(text.replace("\r\n", "\n").replace("\r", "\n"))
+
+        self._log.setTextCursor(cursor)
         sb = self._log.verticalScrollBar()
         sb.setValue(sb.maximum())
 
