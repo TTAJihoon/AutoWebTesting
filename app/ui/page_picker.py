@@ -14,7 +14,7 @@ from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSpinBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
-    QProgressBar, QFrame, QCheckBox,
+    QProgressBar, QFrame, QCheckBox, QApplication,
 )
 
 
@@ -39,6 +39,11 @@ class _CollectWorker(QThread):
         self._max_pages     = max_pages
         self._max_depth     = max_depth
         self._auth_sequence = auth_sequence
+        self._user_stop     = False     # UI 스레드에서 set, BFS가 read
+
+    def request_stop(self) -> None:
+        """협력적 중단 요청 (BFS 다음 페이지 시작 전 체크됨)."""
+        self._user_stop = True
 
     def run(self) -> None:
         try:
@@ -49,6 +54,7 @@ class _CollectWorker(QThread):
                 max_depth=self._max_depth,
                 auth_sequence=self._auth_sequence,
                 progress_cb=self.progress.emit,
+                should_stop=lambda: self._user_stop,
             )
             self.finished_ok.emit(urls)
         except Exception as e:
@@ -104,46 +110,70 @@ class PagePickerDialog(QDialog):
         root.addWidget(hdr)
 
         hint = QLabel(
-            "🔍  BFS로 URL 목록을 수집한 후 분석할 페이지를 체크하세요. "
-            "♻ 표시된 페이지는 과거 분석 결과를 재사용하여 시간을 절약합니다."
+            "🔍  설정을 확인하고 <b>'URL 수집 시작'</b>을 누르면 시작 URL에서 같은 사이트 내의 페이지를 자동으로 찾습니다.  "
+            "수집 후 분석할 페이지를 체크하세요. ♻ 표시는 과거 분석 결과를 재사용하여 시간을 절약합니다."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet(
             "QLabel { background:#e8f4fd; color:#0066cc; padding:8px;"
             " border-radius:4px; font-size:12px; }"
         )
+        hint.setTextFormat(Qt.RichText)
         root.addWidget(hint)
 
-        # 옵션 행 (max_pages / max_depth / 시작)
+        # 옵션 행 (탐색 깊이 + 시작/중단)
         opt_row = QHBoxLayout()
         opt_row.setSpacing(8)
 
-        opt_row.addWidget(QLabel("최대 페이지:"))
-        self._max_pages_spin = QSpinBox()
-        self._max_pages_spin.setRange(1, 500)
-        self._max_pages_spin.setValue(max_pages)
-        self._max_pages_spin.setFixedWidth(80)
-        opt_row.addWidget(self._max_pages_spin)
-
-        opt_row.addSpacing(10)
-        opt_row.addWidget(QLabel("BFS 깊이:"))
+        depth_lbl = QLabel("탐색 깊이:")
+        depth_lbl.setToolTip(
+            "시작 URL에서 링크를 몇 단계까지 따라갈지:\n"
+            "  0 = 시작 페이지만\n"
+            "  1 = 시작 페이지 + 직접 링크\n"
+            "  2 = 위 + 그 링크의 링크 (일반 사이트 권장)\n"
+            "  3+ = 매우 큰 사이트 — 시간 오래 걸림\n\n"
+            "참고: 페이지 수는 자동(사이트 BFS 자연 종료 또는 안전한도 500개)."
+        )
+        opt_row.addWidget(depth_lbl)
         self._max_depth_spin = QSpinBox()
         self._max_depth_spin.setRange(0, 5)
         self._max_depth_spin.setValue(max_depth)
         self._max_depth_spin.setFixedWidth(60)
+        self._max_depth_spin.setToolTip(depth_lbl.toolTip())
         opt_row.addWidget(self._max_depth_spin)
 
-        opt_row.addSpacing(16)
+        depth_inline = QLabel(
+            "  (0=시작 URL만 · 1=직접 링크 · 2=권장 · 3+=느림)"
+        )
+        depth_inline.setStyleSheet("QLabel { color:#94a3b8; font-size:11px; }")
+        opt_row.addWidget(depth_inline)
+
+        opt_row.addStretch()
+
         self._collect_btn = QPushButton("URL 수집 시작")
+        self._collect_btn.setMinimumWidth(120)
+        self._collect_btn.setStyleSheet(
+            "QPushButton { background:#3b82f6; color:#ffffff;"
+            " border:none; border-radius:6px;"
+            " padding:6px 16px; font-size:13px; font-weight:600; }"
+            "QPushButton:hover { background:#2563eb; }"
+            "QPushButton:disabled { background:#cbd5e1; }"
+        )
         self._collect_btn.clicked.connect(self._start_collect)
         opt_row.addWidget(self._collect_btn)
 
-        self._stop_btn = QPushButton("중단")
+        self._stop_btn = QPushButton("⏹  중단")
         self._stop_btn.setEnabled(False)
+        self._stop_btn.setStyleSheet(
+            "QPushButton { background:#ffffff; color:#dc2626;"
+            " border:1px solid #fca5a5; border-radius:6px;"
+            " padding:6px 14px; font-size:12px; font-weight:600; }"
+            "QPushButton:hover:enabled { background:#fee2e2; }"
+            "QPushButton:disabled { color:#cbd5e1; border-color:#e2e8f0; }"
+        )
         self._stop_btn.clicked.connect(self._stop_collect)
         opt_row.addWidget(self._stop_btn)
 
-        opt_row.addStretch()
         root.addLayout(opt_row)
 
         # 진행률
@@ -200,6 +230,9 @@ class PagePickerDialog(QDialog):
         self._table.setColumnWidth(3, 50)
         self._table.setColumnWidth(4, 80)
         self._table.itemChanged.connect(self._on_item_changed)
+
+        # shift+click 체크박스 범위 선택용 — 마지막 클릭 row 추적
+        self._last_check_row: int = -1
         root.addWidget(self._table, 1)
 
         # 하단 버튼
@@ -214,14 +247,17 @@ class PagePickerDialog(QDialog):
         btn_row.addWidget(self._ok_btn)
         root.addLayout(btn_row)
 
-        # 자동 시작
-        self._start_collect()
+        # 초기 안내 — 자동 시작하지 않고 사용자 클릭 대기
+        self._status_lbl.setText(
+            "위 '탐색 깊이'를 설정한 뒤 'URL 수집 시작' 버튼을 누르세요."
+        )
 
     # ── BFS 워커 시작/중단 ────────────────────────────────────────────────
     def _start_collect(self) -> None:
         if self._worker is not None and self._worker.isRunning():
             return
         self._collect_btn.setEnabled(False)
+        self._max_depth_spin.setEnabled(False)
         self._stop_btn.setEnabled(True)
         self._progress.setVisible(True)
         self._table.setRowCount(0)
@@ -233,7 +269,7 @@ class PagePickerDialog(QDialog):
 
         self._worker = _CollectWorker(
             start_url=self._start_url,
-            max_pages=self._max_pages_spin.value(),
+            max_pages=500,                              # 안전 상한 — 사용자 노출 X
             max_depth=self._max_depth_spin.value(),
             auth_sequence=self._auth_sequence,
             parent=self,
@@ -244,10 +280,11 @@ class PagePickerDialog(QDialog):
         self._worker.start()
 
     def _stop_collect(self) -> None:
+        """협력적 중단 — BFS 워커가 다음 페이지 시작 전 체크해서 종료."""
         if self._worker and self._worker.isRunning():
-            # Qt thread는 강제 terminate가 위험하므로 사용자에게 알림 (실제 BFS는 곧 끝남)
-            self._status_lbl.setText("중단 요청됨 — 현재 페이지 완료 후 종료됩니다")
-            self._worker.requestInterruption()
+            self._status_lbl.setText("중단 요청됨 — 현재 페이지 완료 후 종료됩니다…")
+            self._worker.request_stop()
+        # 사용자가 한 번만 누르면 되도록 비활성
         self._stop_btn.setEnabled(False)
 
     def _on_progress(self, msg: str) -> None:
@@ -256,6 +293,8 @@ class PagePickerDialog(QDialog):
     def _on_collect_done(self, urls: list[dict]) -> None:
         self._urls = urls or []
         self._collect_btn.setEnabled(True)
+        self._collect_btn.setText("URL 다시 수집")
+        self._max_depth_spin.setEnabled(True)
         self._stop_btn.setEnabled(False)
         self._progress.setVisible(False)
 
@@ -279,6 +318,7 @@ class PagePickerDialog(QDialog):
 
     def _on_collect_error(self, err: str) -> None:
         self._collect_btn.setEnabled(True)
+        self._max_depth_spin.setEnabled(True)
         self._stop_btn.setEnabled(False)
         self._progress.setVisible(False)
         self._status_lbl.setText("URL 수집 실패")
@@ -328,7 +368,35 @@ class PagePickerDialog(QDialog):
             self._table.blockSignals(False)
         self._refresh_count()
 
-    def _on_item_changed(self, _item) -> None:
+    def _on_item_changed(self, item) -> None:
+        """체크박스 변경 핸들러 — shift 누르고 클릭 시 범위 다중 선택."""
+        if item is None or item.column() != 0:
+            self._refresh_count()
+            return
+
+        row = item.row()
+        target_state = item.checkState()
+
+        # Shift 키 + 이전 클릭이 있으면 범위 선택 (이전 다른 체크는 유지)
+        mods = QApplication.keyboardModifiers()
+        if (
+            (mods & Qt.ShiftModifier)
+            and self._last_check_row >= 0
+            and self._last_check_row != row
+        ):
+            lo, hi = sorted([self._last_check_row, row])
+            self._table.blockSignals(True)
+            try:
+                for r in range(lo, hi + 1):
+                    if r == row:
+                        continue   # 이미 변경됨
+                    chk = self._table.item(r, 0)
+                    if chk is not None:
+                        chk.setCheckState(target_state)
+            finally:
+                self._table.blockSignals(False)
+
+        self._last_check_row = row
         self._refresh_count()
 
     def _refresh_count(self) -> None:

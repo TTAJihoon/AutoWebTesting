@@ -246,7 +246,7 @@ class RunWizard(QDialog):
     def __init__(self, api_key: str, prefill_url: str = "", parent=None):
         super().__init__(parent)
         self.setWindowTitle("새 실행 — 설정 마법사")
-        self.setFixedSize(720, 740)
+        self.setFixedSize(720, 660)
         self.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
         self._api_key = api_key
         self._auth_rows: list[dict] = []
@@ -295,32 +295,6 @@ class RunWizard(QDialog):
         lay.setSpacing(12)
 
         lay.addWidget(QLabel("<b>Step 1: 대상 URL과 요구사항 파일</b>"))
-
-        # ── ⚡ 추천 프리셋 (한 클릭으로 Step 3 옵션 자동 설정) ───────────────
-        preset_box = QGroupBox("⚡ 추천 설정 (Step 3 옵션을 한 번에 자동 채워줍니다)")
-        p_lay = QHBoxLayout(preset_box)
-        p_lay.setSpacing(8)
-
-        preset_specs = [
-            ("free",     "🆓  무료 플랜",  "max 20개\n비용 없음",       "#16a34a"),
-            ("balanced", "🚀  균형 (권장)", "max 50개\n무료 권장",       "#3b82f6"),
-            ("full",     "🏢  전체 분석", "무제한\n유료 권장",         "#7c3aed"),
-        ]
-        for key, title, sub, color in preset_specs:
-            btn = QPushButton(f"{title}\n{sub}")
-            btn.setFixedHeight(58)
-            btn.setStyleSheet(
-                f"QPushButton {{"
-                f" background:#ffffff; color:{color};"
-                f" border:2px solid {color}; border-radius:6px;"
-                f" font-size:12px; font-weight:600; text-align:center;"
-                f" min-height: 0px; padding: 4px;"
-                f"}}"
-                f"QPushButton:hover {{ background:{color}; color:#ffffff; }}"
-            )
-            btn.clicked.connect(lambda _checked, k=key: self._apply_preset(k))
-            p_lay.addWidget(btn)
-        lay.addWidget(preset_box)
 
         url_box = QGroupBox("대상 웹 URL")
         url_box.setToolTip(
@@ -386,14 +360,14 @@ class RunWizard(QDialog):
             )
             lay.addWidget(picker_hint)
 
-        # 인증 테이블 (4열: action | selector/URL | value | 🎯)
+        # 인증 테이블 (4열: 동작 | selector/URL | value | 🎯)
         self._auth_table = QTableWidget(0, 4)
         self._auth_table.setObjectName("auth_table")
         self._auth_table.setHorizontalHeaderLabels(
-            ["action", "selector / URL", "값 (fill 전용)", ""]
+            ["동작", "선택자 / URL", "값 (값 입력 전용)", ""]
         )
         # ① 너비를 먼저 지정한 뒤 ② Fixed 모드로 고정 (순서 중요)
-        self._auth_table.setColumnWidth(0, 90)
+        self._auth_table.setColumnWidth(0, 140)   # 한글 라벨이 들어가도록 충분히
         self._auth_table.setColumnWidth(2, 160)
         self._auth_table.setColumnWidth(3, 44)
         hh = self._auth_table.horizontalHeader()
@@ -402,7 +376,7 @@ class RunWizard(QDialog):
         hh.setSectionResizeMode(2, QHeaderView.Fixed)
         hh.setSectionResizeMode(3, QHeaderView.Fixed)
         # resizeSection 으로 한 번 더 강제 (Fixed 고정 후에도 적용됨)
-        hh.resizeSection(0, 90)
+        hh.resizeSection(0, 140)
         hh.resizeSection(2, 160)
         hh.resizeSection(3, 44)
         vh = self._auth_table.verticalHeader()
@@ -634,10 +608,19 @@ class RunWizard(QDialog):
     def _collect_auth(self) -> None:
         self._auth_rows = []
         for r in range(self._auth_table.rowCount()):
-            # action: QComboBox 위젯에서 읽기 (없으면 아이템 텍스트 폴백)
+            # action: QComboBox의 userData(영문 코드)에서 읽기 (없으면 텍스트 폴백)
             combo = self._auth_table.cellWidget(r, 0)
             if combo is not None:
-                action = combo.currentText().strip()
+                data = combo.currentData()
+                if data:
+                    action = str(data).strip()
+                else:
+                    # fallback: 텍스트에서 영문 코드 추출
+                    txt = combo.currentText().strip()
+                    if "(" in txt and ")" in txt:
+                        action = txt[txt.rfind("(") + 1: txt.rfind(")")].strip()
+                    else:
+                        action = txt
             else:
                 action = (self._auth_table.item(r, 0) or QTableWidgetItem("")).text().strip()
 
@@ -674,42 +657,6 @@ class RunWizard(QDialog):
         self.run_config_ready.emit(config)
         self.accept()
 
-    # ── ⚡ 추천 프리셋 적용 ──────────────────────────────────────────────
-    def _apply_preset(self, key: str) -> None:
-        """Step 3 옵션을 프리셋에 따라 자동 채움."""
-        presets = {
-            # name → (max_leaves, model_id, headless_check_state, slow_mo, thresh)
-            "free":     (20, "gemini-2.5-flash-lite", False, 0,   0.40),
-            "balanced": (50, "gemini-2.5-flash",      False, 0,   0.30),
-            "full":     (0,  "gemini-2.5-pro",        False, 0,   0.30),
-        }
-        if key not in presets:
-            return
-        max_leaves, model_id, show_browser, slow_mo, thresh = presets[key]
-
-        # max_leaves
-        self._max_leaves_spin.setValue(max_leaves)
-        # 모델 콤보에서 해당 모델 선택 (없으면 무시)
-        target_idx = -1
-        for i in range(self._model_combo.count()):
-            if self._model_combo.itemData(i) == model_id:
-                target_idx = i
-                break
-        if target_idx >= 0:
-            self._model_combo.setCurrentIndex(target_idx)
-        # 헤드풀 옵션 (체크 = 보이게)
-        self._headless_cb.setChecked(show_browser)
-        self._slowmo_spin.setValue(slow_mo)
-        # INFERRED 임계값 (매뉴얼 미첨부 시 자동 조정 로직이 덮어쓸 수 있음)
-        self._thresh_spin.setValue(thresh)
-
-        # 시각적 피드백 — 상단 단계 라벨에 잠시 표시
-        label_map = {"free": "🆓 무료 플랜", "balanced": "🚀 균형", "full": "🏢 전체 분석"}
-        orig = self._step_lbl.text()
-        self._step_lbl.setText(f"{orig}    ✓  {label_map[key]} 프리셋 적용")
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(2500, lambda: self._step_lbl.setText(orig))
-
     # ── 파일 목록 ─────────────────────────────────────────────────────────
     def _add_files(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(
@@ -731,10 +678,14 @@ class RunWizard(QDialog):
         self._auth_table.insertRow(r)
         self._auth_table.setRowHeight(r, 34)   # 컴팩트한 행 높이
 
-        # 열 0: action QComboBox
+        # 열 0: 동작 QComboBox (한글 표시, 내부 userData는 영문 코드)
         combo = QComboBox()
-        combo.addItems(["fill", "click", "goto"])
-        combo.currentTextChanged.connect(self._on_action_changed)
+        combo.addItem("값 입력 (fill)",   userData="fill")
+        combo.addItem("요소 클릭 (click)", userData="click")
+        combo.addItem("URL 이동 (goto)",  userData="goto")
+        # 팝업 너비를 항목 텍스트 길이에 맞춰 자동 확장 (콤보 셀이 작아도 옵션 잘 보이게)
+        combo.view().setMinimumWidth(160)
+        combo.currentIndexChanged.connect(self._on_action_changed_idx)
         self._auth_table.setCellWidget(r, 0, combo)
 
         # 열 3: 🎯 선택자 피커 버튼 (WebEngine 있을 때만)
@@ -767,9 +718,12 @@ class RunWizard(QDialog):
             self._auth_table.removeRow(row)
 
     # ── 액션 변경 시 피커 버튼 활성/비활성 ──────────────────────────────────
-    def _on_action_changed(self, action: str) -> None:
+    def _on_action_changed_idx(self, _idx: int) -> None:
         """goto 행에서는 피커 버튼 비활성화 (URL 입력이므로 선택자 불필요)."""
         combo = self.sender()
+        if combo is None:
+            return
+        action = combo.currentData()
         for r in range(self._auth_table.rowCount()):
             if self._auth_table.cellWidget(r, 0) is combo:
                 btn = self._auth_table.cellWidget(r, 3)
