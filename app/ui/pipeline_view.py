@@ -387,6 +387,12 @@ class PipelineView(QMainWindow):
         tc_hdr_row.addWidget(self._latest_btn)
 
         tc_hdr_row.addStretch()
+        dbl_hint = QLabel("더블클릭 → 상세")
+        dbl_hint.setStyleSheet(
+            "QLabel { font-size: 10px; color: #94a3b8;"
+            " background: transparent; border: none; padding: 0 4px; }"
+        )
+        tc_hdr_row.addWidget(dbl_hint)
         self._tc_count_lbl = QLabel("총 0건")
         self._tc_count_lbl.setStyleSheet(
             "QLabel { font-size: 11px; color: #64748b;"
@@ -418,6 +424,13 @@ class PipelineView(QMainWindow):
             " border: none; border-bottom: 1px solid #e2e8f0; }"
             "QTableWidget::item { border-bottom: 1px solid #f1f5f9; padding: 4px 8px; }"
         )
+        # 더블클릭 → TC 통합 상세 다이얼로그
+        self._tc_table.cellDoubleClicked.connect(self._on_tc_double_clicked)
+        self._tc_table.setToolTip("행을 더블클릭하면 통합 상세 정보를 볼 수 있습니다")
+
+        # 열려있는 상세 다이얼로그 추적 (비모달이라 여러 개 동시 가능)
+        self._open_detail_dialogs: list = []
+
         tc_lay.addWidget(self._tc_table)
         splitter.addWidget(tc_card)
 
@@ -1042,6 +1055,23 @@ class PipelineView(QMainWindow):
         self._set_status("오류 발생")
         self._append_log(f"[오류]\n{msg}")
         QMessageBox.critical(self, "오류", msg[:800])
+
+    # ── TC 더블클릭 → 통합 상세 다이얼로그 ────────────────────────────────
+    def _on_tc_double_clicked(self, row: int, _col: int) -> None:
+        if row < 0 or row >= len(self._tcs):
+            return
+        from app.ui.failure_detail import FailureDetailDialog
+        dlg = FailureDetailDialog(
+            tc=self._tcs[row],
+            run_dir=self._orch.run_dir,
+            parent=self,
+        )
+        # 비모달이라 destroyed 시그널로 추적 정리
+        dlg.destroyed.connect(lambda *_: self._open_detail_dialogs.remove(dlg)
+                              if dlg in self._open_detail_dialogs else None)
+        self._open_detail_dialogs.append(dlg)
+        dlg.show()
+        dlg.raise_()
 
     # ── 로그 검색 ───────────────────────────────────────────────────────────
     def _active_log(self) -> QPlainTextEdit:
