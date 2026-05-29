@@ -39,6 +39,7 @@ class Dashboard(QMainWindow):
     new_run_requested = Signal()       # → wizard 열기
     open_run_requested = Signal(str)   # run_id → pipeline_view 열기
     clone_run_requested = Signal(str)  # url → wizard(prefill) 열기
+    resume_run_requested = Signal(str, int)   # (run_id, from_stage) → 재개
     logout_requested = Signal()        # → 로그아웃
 
     def __init__(
@@ -650,17 +651,36 @@ class Dashboard(QMainWindow):
         return rows
 
     def _on_runs_context_menu(self, pos) -> None:
-        """우클릭 컨텍스트 메뉴 — 복제 / admin이면 삭제도."""
+        """우클릭 컨텍스트 메뉴 — 복제 / 이어서 진행 / admin이면 삭제도."""
         row = self._runs_table.rowAt(pos.y())
         if row < 0:
             return
-        url_item = self._runs_table.item(row, self._url_col)
-        url = url_item.text() if url_item else ""
+        url_item   = self._runs_table.item(row, self._url_col)
+        runid_item = self._runs_table.item(row, self._runid_col)
+        url   = url_item.text() if url_item else ""
+        run_id = runid_item.text() if runid_item else ""
         has_url = bool(url) and url != "-"
 
+        # 재개 가능 여부 검사 — tc_gated.json / tc_verified.json 존재 확인
+        resume_stage: int | None = None
+        if run_id:
+            from app.core.orchestrator import Orchestrator
+            run_dir = RUNS_DIR / run_id
+            resume_stage = Orchestrator.suggest_resume_stage(run_dir)
+
         menu = QMenu(self)
-        clone_action = menu.addAction("복제")
+        clone_action = menu.addAction("복제 (URL 복사 + 새 마법사)")
         clone_action.setEnabled(has_url)
+
+        resume_action = None
+        if resume_stage is not None:
+            menu.addSeparator()
+            label = (
+                "🔄  Stage 4 (Reviewer Gate)부터 재개"
+                if resume_stage == 4
+                else "🔄  Stage 5~7부터 재개 (Gate 결정 보존)"
+            )
+            resume_action = menu.addAction(label)
 
         delete_action = None
         if self._role == "admin":
@@ -672,6 +692,8 @@ class Dashboard(QMainWindow):
             QApplication.clipboard().setText(url)
             self.clone_run_requested.emit(url)
             self.statusBar().showMessage(f"URL 복사됨: {url}", 3000)
+        elif resume_action is not None and action == resume_action:
+            self.resume_run_requested.emit(run_id, resume_stage)
         elif action is not None and action == delete_action:
             # 우클릭 → 해당 행만 체크 후 삭제 (다중 체크된 상태 보존)
             chk = self._runs_table.item(row, 0)

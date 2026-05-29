@@ -308,6 +308,43 @@ class Orchestrator:
         self._stage = 3
         return True
 
+    def load_from_stage4(self, run_id: str | None = None) -> bool:
+        """기존 tc_gated.json 로드 — Stage 5부터 재개할 때 사용 (Gate 결정 보존).
+
+        Returns:
+            True if loaded successfully, False otherwise.
+        """
+        import json
+        target_run = run_id or self.config.run_id
+        path = RUNS_DIR / target_run / "tc_gated.json"
+        if not path.exists():
+            return False
+        self.tcs = json.loads(path.read_text(encoding="utf-8"))
+        manual_path = RUNS_DIR / target_run / "ingest" / "manual.txt"
+        if manual_path.exists():
+            manual_text = manual_path.read_text(encoding="utf-8")
+            from app.core import stage1_ingest
+            leaves = stage1_ingest._extract_leaves_from_text(manual_text)
+            self.ingest_result = {"manual_text": manual_text, "leaves": leaves}
+        self.run_dir = RUNS_DIR / target_run
+        self._stage = 4
+        return True
+
+    @staticmethod
+    def suggest_resume_stage(run_dir: Path) -> int | None:
+        """run 디렉토리의 산출물을 보고 어느 stage부터 재개 가능한지 추정.
+
+        Returns:
+            5 = Stage 5~7 재개 (tc_gated.json 있음, Gate 결정 보존)
+            4 = Stage 4 (Reviewer Gate) 재개 (tc_verified.json 있음)
+            None = 재개 불가 (Stage 1~3을 처음부터 해야 함)
+        """
+        if (run_dir / "tc_gated.json").exists():
+            return 5
+        if (run_dir / "tc_verified.json").exists():
+            return 4
+        return None
+
     def _save_intermediate(self, name: str) -> None:
         import json
         path = self.run_dir / f"{name}.json"

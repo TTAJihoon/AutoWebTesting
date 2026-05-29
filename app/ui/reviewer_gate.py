@@ -1,7 +1,7 @@
 """Stage 4 Reviewer Gate — TC별 A/E/R/P 결정 UI (D45: PySide6)."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -127,12 +127,45 @@ class _TcDetailDialog(QDialog):
 
 
 # ── Reviewer Gate 메인 다이얼로그 ────────────────────────────────────────────
+class _RegenerateWorker(QThread):
+    """rejected TC 재생성 백그라운드 worker."""
+    progress = Signal(str)
+    finished_ok = Signal(list, int, int)   # (new_tcs, replaced, failed_leaf_count)
+    error    = Signal(str)
+
+    def __init__(self, tcs, llm_client, manual_text, parent=None):
+        super().__init__(parent)
+        self._tcs = tcs
+        self._llm = llm_client
+        self._manual = manual_text
+
+    def run(self) -> None:
+        try:
+            from app.core.regenerate_rejected import regenerate_rejected
+            new_tcs, replaced, failed = regenerate_rejected(
+                self._tcs, self._llm, self._manual,
+                progress_cb=self.progress.emit,
+            )
+            self.finished_ok.emit(new_tcs, replaced, failed)
+        except Exception as e:
+            import traceback
+            self.error.emit(f"{e}\n\n{traceback.format_exc()}")
+
+
 class ReviewerGate(QDialog):
     """TC 목록에 대해 A/E/R/P 결정. decisions_ready(dict) 시그널로 결과 전달."""
 
     decisions_ready = Signal(dict)  # {tc_id: {status, note}}
+    tcs_regenerated = Signal(list)  # 재생성 후 새 TC 리스트 (호출자가 갱신용)
 
-    def __init__(self, tcs: list[dict], reviewer_id: str, parent=None):
+    def __init__(
+        self,
+        tcs: list[dict],
+        reviewer_id: str,
+        parent=None,
+        llm_client=None,             # 재생성에 사용 (None이면 재생성 기능 비활성)
+        manual_text: str = "",       # 재생성 컨텍스트
+    ):
         super().__init__(parent)
         self.setWindowTitle("Stage 4 — Reviewer Gate")
         self.resize(1200, 720)
@@ -141,6 +174,9 @@ class ReviewerGate(QDialog):
 
         self._tcs = tcs
         self._reviewer_id = reviewer_id
+        self._llm = llm_client
+        self._manual_text = manual_text
+        self._regen_worker: _RegenerateWorker | None = None
         self._decisions: dict[str, dict] = {
             tc.get("tc_id", f"__unknown_{i}__"): {
                 "status": tc.get("review_status", "pending"),
@@ -205,6 +241,23 @@ class ReviewerGate(QDialog):
         )
         excel_btn.clicked.connect(self._export_excel)
         top_lay.addWidget(excel_btn)
+
+        # 거부된 TC 재생성 버튼 (llm_client 있을 때만)
+        if self._llm is not None:
+            self._regen_btn = QPushButton("🔄  거부 TC 재생성")
+            self._regen_btn.setFixedHeight(32)
+            self._regen_btn.setStyleSheet(
+                "QPushButton { background: #7c3aed; color: #ffffff; border-radius: 6px;"
+                " padding: 0 14px; font-size: 12px; font-weight: 600; border: none; }"
+                "QPushButton:hover { background: #6d28d9; }"
+                "QPushButton:disabled { background: #c4b5fd; }"
+            )
+            self._regen_btn.setToolTip(
+                "거부 상태인 TC들의 사유를 AI에 전달하여 새로운 TC로 재생성합니다.\n"
+                "(승인/수정 TC는 보존됩니다. 재생성된 TC는 pending 상태로 다시 검토 필요)"
+            )
+            self._regen_btn.clicked.connect(self._regenerate_rejected)
+            top_lay.addWidget(self._regen_btn)
 
         root.addWidget(top_card)
 
@@ -493,6 +546,113 @@ class ReviewerGate(QDialog):
             f"승인 {counts['approved']}  수정 {counts['edited']}  "
             f"거부 {counts['rejected']}  검토 전 {counts['pending']}"
         )
+
+    # ── 거부된 TC 재생성 ─────────────────────────────────────────────────
+    def _regenerate_rejected(self) -> None:
+        """rejected TC의 사유를 LLM에 전달해 새 TC로 교체."""
+        if self._llm is None:
+            return
+
+        # 거부 TC 개수 확인
+        rejected_count = sum(
+            1 for d in self._decisions.values()
+            if (d.get("status") or "").lower() == "rejected"
+        )
+        if rejected_count == 0:
+            QMessageBox.information(
+                self, "재생성 불가",
+                "거부(rejected) 상태인 TC가 없습니다.\n"
+                "재생성하려면 먼저 거부할 TC를 표시하고 사유를 입력하세요."
+            )
+            return
+
+        # 사유 미입력 TC 개수 검사 + 확인
+        no_note = sum(
+            1 for tc in self._tcs
+            if (self._decisions.get(tc.get("tc_id", ""), {}).get("status") == "rejected"
+                and not (self._decisions.get(tc.get("tc_id", ""), {}).get("note") or "").strip())
+        )
+        warn_msg = (
+            f"거부된 TC {rejected_count}개를 AI로 재생성합니다.\n\n"
+        )
+        if no_note > 0:
+            warn_msg += (
+                f"⚠ {no_note}개 TC는 거부 사유가 비어 있습니다.\n"
+                "사유가 있으면 더 정확한 재생성이 가능합니다.\n\n"
+            )
+        warn_msg += "계속하시겠습니까? (LLM 호출이 발생합니다)"
+        res = QMessageBox.question(
+            self, "거부 TC 재생성",
+            warn_msg, QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes,
+        )
+        if res != QMessageBox.Yes:
+            return
+
+        # 현재 결정 상태를 TC에 반영해 worker에 넘김
+        tcs_with_decisions = []
+        for tc in self._tcs:
+            tc_id = tc.get("tc_id", "")
+            dec = self._decisions.get(tc_id, {})
+            tcs_with_decisions.append({
+                **tc,
+                "review_status": dec.get("status", "pending"),
+                "reviewer_note": dec.get("note", ""),
+                "reviewer_id":   dec.get("reviewer_id", ""),
+            })
+
+        # UI 잠금
+        self._regen_btn.setEnabled(False)
+        self._regen_btn.setText("🔄  재생성 중…")
+        self._submit_btn.setEnabled(False)
+
+        self._regen_worker = _RegenerateWorker(
+            tcs=tcs_with_decisions,
+            llm_client=self._llm,
+            manual_text=self._manual_text,
+            parent=self,
+        )
+        self._regen_worker.progress.connect(self._on_regen_progress)
+        self._regen_worker.finished_ok.connect(self._on_regen_done)
+        self._regen_worker.error.connect(self._on_regen_error)
+        self._regen_worker.start()
+
+    def _on_regen_progress(self, msg: str) -> None:
+        # 진행 메시지를 요약 라벨에 잠깐 표시
+        self._summary_lbl.setText(msg[:100])
+
+    def _on_regen_done(self, new_tcs: list, replaced: int, failed: int) -> None:
+        self._regen_btn.setEnabled(True)
+        self._regen_btn.setText("🔄  거부 TC 재생성")
+        self._submit_btn.setEnabled(True)
+
+        # 내부 상태 갱신: 새 TC + decisions 재구축
+        self._tcs = new_tcs
+        self._decisions = {
+            tc.get("tc_id", f"__unknown_{i}__"): {
+                "status": tc.get("review_status", "pending"),
+                "note":   tc.get("reviewer_note", ""),
+                "reviewer_id": self._reviewer_id,
+            }
+            for i, tc in enumerate(new_tcs)
+        }
+        self._load_tcs()
+
+        # 호출자(PipelineView)에게도 새 TC 알림
+        self.tcs_regenerated.emit(new_tcs)
+
+        QMessageBox.information(
+            self, "재생성 완료",
+            f"✅ TC {replaced}개 교체/생성 완료\n"
+            f"실패한 leaf: {failed}개\n\n"
+            "재생성된 TC는 'pending'(검토 전) 상태로 표시됩니다.\n"
+            "다시 검토 후 승인/거부/수정 결정해 주세요."
+        )
+
+    def _on_regen_error(self, err: str) -> None:
+        self._regen_btn.setEnabled(True)
+        self._regen_btn.setText("🔄  거부 TC 재생성")
+        self._submit_btn.setEnabled(True)
+        QMessageBox.critical(self, "재생성 오류", err[:1200])
 
     def _export_excel(self) -> None:
         """현재 TC 목록(결정 반영)을 Excel 파일로 저장."""

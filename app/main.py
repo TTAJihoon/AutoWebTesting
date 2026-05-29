@@ -56,8 +56,130 @@ def main() -> None:
         dash.new_run_requested.connect(_open_wizard)
         dash.open_run_requested.connect(_reopen_run)
         dash.clone_run_requested.connect(_clone_run)
+        dash.resume_run_requested.connect(_resume_run)
         dash.logout_requested.connect(_do_logout)
         dash.show()
+
+    def _resume_run(run_id: str, from_stage: int) -> None:
+        """이력에서 우클릭 → 'Stage N부터 재개'.
+
+        from_stage:
+          4 = Reviewer Gate부터 (tc_verified.json 로드)
+          5 = Stage 5~7부터 (tc_gated.json 로드)
+        """
+        import json
+        from app.core.orchestrator import RunConfig
+        from pathlib import Path as _P
+
+        run_dir = _P("data/runs") / run_id
+        meta_path = run_dir / "meta.json"
+        if not meta_path.exists():
+            QMessageBox.warning(dash, "재개 불가", f"meta.json이 없습니다: {run_id}")
+            return
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            QMessageBox.critical(dash, "재개 오류", f"meta.json 로드 실패: {e}")
+            return
+
+        current_key = load_api_key() or api_key
+        # 기존 meta에서 환경 복원
+        cfg = RunConfig(
+            api_key=current_key,
+            target_url=meta.get("target_url", ""),
+            input_files=meta.get("input_files") or [],
+            auth_sequence=[],   # 인증은 이미 Stage 0에서 완료, 재개에선 불필요
+            run_id=run_id,      # 같은 run_id 유지 — 산출물 덮어쓰기
+            inferred_threshold=meta.get("inferred_threshold", 0.30),
+            max_leaves=meta.get("max_leaves", 50),
+            model_override=meta.get("model_override"),
+            max_pages=meta.get("max_pages", 30),
+            headless_exec=meta.get("headless_exec", True),
+            slow_mo_ms=meta.get("slow_mo_ms", 0),
+        )
+
+        pv = PipelineView(config=cfg, parent=None)
+        _pipeline_views.append(pv)
+
+        def _open_gate(tcs: list[dict]) -> None:
+            try:
+                manual_text = ""
+                try:
+                    manual_text = pv._orch.ingest_result.get("manual_text", "")
+                except Exception:
+                    pass
+                gate = ReviewerGate(
+                    tcs=tcs, reviewer_id=username, parent=pv,
+                    llm_client=pv._orch.llm,
+                    manual_text=manual_text,
+                )
+                gate.decisions_ready.connect(pv.apply_gate)
+                gate.tcs_regenerated.connect(_on_tcs_regenerated_resume)
+                gate.raise_()
+                gate.activateWindow()
+                gate.exec()
+            except Exception:
+                import traceback
+                QMessageBox.critical(pv, "Stage 4 오류", traceback.format_exc()[:1200])
+
+        def _on_tcs_regenerated_resume(new_tcs: list[dict]) -> None:
+            pv._tcs = new_tcs
+            pv._orch.tcs = new_tcs
+            pv._orch._save_intermediate("tc_verified")
+            pv._refresh_tc_table()
+            pv._append_log(f"🔄 거부 TC 재생성 — 총 {len(new_tcs)}개 (검토 후 다시 확정)")
+
+        pv.gate_review_requested.connect(_open_gate)
+        pv.show()
+
+        # 재개 — orchestrator에 데이터 로드 + 적절한 stage 활성화
+        try:
+            if from_stage == 4:
+                if not pv._orch.load_from_stage3(run_id=run_id):
+                    QMessageBox.warning(pv, "재개 실패", "tc_verified.json 로드 실패")
+                    return
+                pv._tcs = pv._orch.tcs
+                pv._max_progress = 3
+                pv._update_circles(4, "Stage 4 — Reviewer Gate 대기")
+                pv._set_status(f"Stage 3 완료 (재개)  |  TC {len(pv._tcs)}개", active=True, running=False)
+                pv._run_btn.setVisible(False)
+                pv._gate_btn.setVisible(True)
+                pv._gate_btn.setEnabled(True)
+                pv._exec_btn.setVisible(True)
+                pv._exec_btn.setEnabled(False)
+                pv._refresh_tc_table()
+                # Stage 0 산출물 있으면 다운로드 버튼 노출
+                if (pv._orch.run_dir / "dom-scan" / "feature-spec-draft.json").exists():
+                    pv._feature_dl_btn.setVisible(True)
+                    pv._feature_csv_btn.setVisible(True)
+                if (pv._orch.run_dir / "dom-scan" / "screenshots").exists():
+                    pv._screenshot_dir_btn.setVisible(True)
+                pv._append_log(f"🔄 Stage 4부터 재개 — TC {len(pv._tcs)}개 로드됨")
+            elif from_stage == 5:
+                if not pv._orch.load_from_stage4(run_id=run_id):
+                    QMessageBox.warning(pv, "재개 실패", "tc_gated.json 로드 실패")
+                    return
+                pv._tcs = pv._orch.tcs
+                pv._max_progress = 4
+                pv._update_circles(5, "Stage 5 대기 (재개)")
+                pv._set_status(f"Stage 4 완료 (재개)  |  TC {len(pv._tcs)}개", active=True, running=False)
+                pv._run_btn.setVisible(False)
+                pv._gate_btn.setVisible(False)
+                pv._exec_btn.setVisible(True)
+                pv._exec_btn.setEnabled(True)
+                pv._exec_btn.setText("Stage 5~7 실행")
+                pv._refresh_tc_table()
+                if (pv._orch.run_dir / "dom-scan" / "feature-spec-draft.json").exists():
+                    pv._feature_dl_btn.setVisible(True)
+                    pv._feature_csv_btn.setVisible(True)
+                if (pv._orch.run_dir / "dom-scan" / "screenshots").exists():
+                    pv._screenshot_dir_btn.setVisible(True)
+                pv._append_log(f"🔄 Stage 5부터 재개 — TC {len(pv._tcs)}개 로드됨 (Gate 결정 보존)")
+            else:
+                QMessageBox.warning(pv, "재개 실패", f"지원하지 않는 stage: {from_stage}")
+        except Exception as e:
+            import traceback
+            QMessageBox.critical(pv, "재개 오류", traceback.format_exc()[:1200])
 
     def _open_wizard() -> None:
         # 설정 탭에서 키를 저장한 경우를 위해 항상 최신값 로드
@@ -80,8 +202,19 @@ def main() -> None:
 
         def _open_gate(tcs: list[dict]) -> None:
             try:
-                gate = ReviewerGate(tcs=tcs, reviewer_id=username, parent=pv)
+                manual_text = ""
+                try:
+                    manual_text = pv._orch.ingest_result.get("manual_text", "")
+                except Exception:
+                    pass
+                gate = ReviewerGate(
+                    tcs=tcs, reviewer_id=username, parent=pv,
+                    llm_client=pv._orch.llm,
+                    manual_text=manual_text,
+                )
                 gate.decisions_ready.connect(pv.apply_gate)
+                # 재생성된 TC를 pipeline_view에도 반영
+                gate.tcs_regenerated.connect(_on_tcs_regenerated)
                 gate.raise_()
                 gate.activateWindow()
                 gate.exec()
@@ -91,6 +224,14 @@ def main() -> None:
                     pv, "Stage 4 오류",
                     traceback.format_exc()[:1200],
                 )
+
+        def _on_tcs_regenerated(new_tcs: list[dict]) -> None:
+            """ReviewerGate에서 재생성 발생 시 pipeline_view와 orchestrator도 동기화."""
+            pv._tcs = new_tcs
+            pv._orch.tcs = new_tcs
+            pv._orch._save_intermediate("tc_verified")  # 중간 저장 (이후 재개 가능)
+            pv._refresh_tc_table()
+            pv._append_log(f"🔄 거부 TC 재생성 — 총 {len(new_tcs)}개 (검토 후 다시 확정)")
 
         pv.gate_review_requested.connect(_open_gate)
         pv.show()
