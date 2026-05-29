@@ -246,7 +246,7 @@ class RunWizard(QDialog):
     def __init__(self, api_key: str, prefill_url: str = "", parent=None):
         super().__init__(parent)
         self.setWindowTitle("새 실행 — 설정 마법사")
-        self.setFixedSize(720, 700)
+        self.setFixedSize(720, 740)
         self.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
         self._api_key = api_key
         self._auth_rows: list[dict] = []
@@ -296,10 +296,43 @@ class RunWizard(QDialog):
 
         lay.addWidget(QLabel("<b>Step 1: 대상 URL과 요구사항 파일</b>"))
 
+        # ── ⚡ 추천 프리셋 (한 클릭으로 Step 3 옵션 자동 설정) ───────────────
+        preset_box = QGroupBox("⚡ 추천 설정 (Step 3 옵션을 한 번에 자동 채워줍니다)")
+        p_lay = QHBoxLayout(preset_box)
+        p_lay.setSpacing(8)
+
+        preset_specs = [
+            ("free",     "🆓  무료 플랜",  "max 20개\n비용 없음",       "#16a34a"),
+            ("balanced", "🚀  균형 (권장)", "max 50개\n무료 권장",       "#3b82f6"),
+            ("full",     "🏢  전체 분석", "무제한\n유료 권장",         "#7c3aed"),
+        ]
+        for key, title, sub, color in preset_specs:
+            btn = QPushButton(f"{title}\n{sub}")
+            btn.setFixedHeight(58)
+            btn.setStyleSheet(
+                f"QPushButton {{"
+                f" background:#ffffff; color:{color};"
+                f" border:2px solid {color}; border-radius:6px;"
+                f" font-size:12px; font-weight:600; text-align:center;"
+                f" min-height: 0px; padding: 4px;"
+                f"}}"
+                f"QPushButton:hover {{ background:{color}; color:#ffffff; }}"
+            )
+            btn.clicked.connect(lambda _checked, k=key: self._apply_preset(k))
+            p_lay.addWidget(btn)
+        lay.addWidget(preset_box)
+
         url_box = QGroupBox("대상 웹 URL")
+        url_box.setToolTip(
+            "AI가 자동으로 분석할 웹사이트의 시작 URL입니다.\n"
+            "  • 같은 origin(스킴+호스트)의 페이지를 BFS로 따라가며 분석\n"
+            "  • 로그인 후 접근 가능한 페이지가 있으면 Step 2에서 인증 설정\n\n"
+            "예: http://localhost:8080  ·  https://demo.example.com/app"
+        )
         url_lay = QVBoxLayout(url_box)
         self._url_edit = QLineEdit()
         self._url_edit.setPlaceholderText("https://example.com")
+        self._url_edit.setToolTip(url_box.toolTip())
         url_lay.addWidget(self._url_edit)
         lay.addWidget(url_box)
 
@@ -441,6 +474,13 @@ class RunWizard(QDialog):
 
         # ── INFERRED 임계값 ──────────────────────────────────────────────
         thresh_box = QGroupBox("INFERRED 비율 임계값")
+        thresh_box.setToolTip(
+            "TC 근거(source_quote)가 'INFERRED'(LLM 추론)인 비율이\n"
+            "이 값을 넘으면 Stage 3에서 재작성을 시도합니다.\n\n"
+            "  • 0.30 (기본): 30% 이상이면 재작성 — 매뉴얼이 충분한 경우\n"
+            "  • 0.80~: 거의 모든 추론 허용 — 매뉴얼이 적은 경우\n"
+            "  • 매뉴얼 미첨부 시: 자동으로 1.00 (모두 허용)"
+        )
         t_lay = QVBoxLayout(thresh_box)
         self._thresh_spin = QDoubleSpinBox()
         self._thresh_spin.setRange(0.10, 1.00)
@@ -448,6 +488,7 @@ class RunWizard(QDialog):
         self._thresh_spin.setValue(0.30)
         self._thresh_spin.setDecimals(2)
         self._thresh_spin.setSuffix("  (30% 권장)")
+        self._thresh_spin.setToolTip(thresh_box.toolTip())
         t_lay.addWidget(self._thresh_spin)
         self._thresh_hint = QLabel("")
         self._thresh_hint.setWordWrap(True)
@@ -458,12 +499,21 @@ class RunWizard(QDialog):
 
         # ── 최대 기능 수 (max_leaves) ────────────────────────────────────
         leaves_box = QGroupBox("최대 분석 기능 수 (TC 설계)")
+        leaves_box.setToolTip(
+            "Stage 2에서 TC 설계할 기능(leaf) 개수의 상한입니다.\n\n"
+            "  • 0 = 무제한 (단, 안전 가드로 100개 자동 제한)\n"
+            "  • 무료 플랜은 일 20회 한도 → 50 이하 권장\n"
+            "  • 신뢰도 HIGH → MID → INFERRED 순으로 우선 처리됨\n\n"
+            "예: 분석된 기능 540개 중 max_leaves=50이면\n"
+            "    가장 신뢰도 높은 50개만 TC로 설계됩니다."
+        )
         l_lay = QVBoxLayout(leaves_box)
         self._max_leaves_spin = QSpinBox()
         self._max_leaves_spin.setRange(0, 9999)
         self._max_leaves_spin.setSingleStep(10)
         self._max_leaves_spin.setValue(50)
         self._max_leaves_spin.setSuffix("  개  (0 = 무제한)")
+        self._max_leaves_spin.setToolTip(leaves_box.toolTip())
         l_lay.addWidget(self._max_leaves_spin)
         leaves_hint = QLabel(
             "무료 플랜(20회/일): 50개 이하 권장.  유료 플랜: 0으로 설정하면 전체 기능을 처리합니다."
@@ -475,11 +525,18 @@ class RunWizard(QDialog):
 
         # ── 자동 실행 표시 옵션 (헤드풀 모드) ────────────────────────────
         exec_box = QGroupBox("자동 실행 옵션 (Stage 5)")
+        exec_box.setToolTip(
+            "Stage 5에서 TC를 자동 실행할 때 브라우저 동작을 볼지 결정합니다.\n\n"
+            "  • 체크 해제(기본): 백그라운드 헤드리스 — 빠르고 조용함\n"
+            "  • 체크: 별도 Chromium 창에서 자동화 동작이 보임\n"
+            "    (사용자 마우스/키보드와 분리되므로 다른 작업 동시 가능)"
+        )
         e_lay = QVBoxLayout(exec_box)
         self._headless_cb = QCheckBox(
             "테스트 실행 시 브라우저 표시 (별도 Chromium 창 — 동작을 직접 볼 수 있음)"
         )
         self._headless_cb.setChecked(False)   # 기본: 헤드리스(체크 안 됨)
+        self._headless_cb.setToolTip(exec_box.toolTip())
         e_lay.addWidget(self._headless_cb)
 
         slow_row = QHBoxLayout()
@@ -616,6 +673,42 @@ class RunWizard(QDialog):
         )
         self.run_config_ready.emit(config)
         self.accept()
+
+    # ── ⚡ 추천 프리셋 적용 ──────────────────────────────────────────────
+    def _apply_preset(self, key: str) -> None:
+        """Step 3 옵션을 프리셋에 따라 자동 채움."""
+        presets = {
+            # name → (max_leaves, model_id, headless_check_state, slow_mo, thresh)
+            "free":     (20, "gemini-2.5-flash-lite", False, 0,   0.40),
+            "balanced": (50, "gemini-2.5-flash",      False, 0,   0.30),
+            "full":     (0,  "gemini-2.5-pro",        False, 0,   0.30),
+        }
+        if key not in presets:
+            return
+        max_leaves, model_id, show_browser, slow_mo, thresh = presets[key]
+
+        # max_leaves
+        self._max_leaves_spin.setValue(max_leaves)
+        # 모델 콤보에서 해당 모델 선택 (없으면 무시)
+        target_idx = -1
+        for i in range(self._model_combo.count()):
+            if self._model_combo.itemData(i) == model_id:
+                target_idx = i
+                break
+        if target_idx >= 0:
+            self._model_combo.setCurrentIndex(target_idx)
+        # 헤드풀 옵션 (체크 = 보이게)
+        self._headless_cb.setChecked(show_browser)
+        self._slowmo_spin.setValue(slow_mo)
+        # INFERRED 임계값 (매뉴얼 미첨부 시 자동 조정 로직이 덮어쓸 수 있음)
+        self._thresh_spin.setValue(thresh)
+
+        # 시각적 피드백 — 상단 단계 라벨에 잠시 표시
+        label_map = {"free": "🆓 무료 플랜", "balanced": "🚀 균형", "full": "🏢 전체 분석"}
+        orig = self._step_lbl.text()
+        self._step_lbl.setText(f"{orig}    ✓  {label_map[key]} 프리셋 적용")
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(2500, lambda: self._step_lbl.setText(orig))
 
     # ── 파일 목록 ─────────────────────────────────────────────────────────
     def _add_files(self) -> None:

@@ -234,9 +234,116 @@ class Dashboard(QMainWindow):
             " padding: 6px 8px; color: #334155; }"
             "QTableWidget::item:selected { background: #eff6ff; color: #1e293b; }"
         )
-        lay.addWidget(self._runs_table)
+
+        # ── 빈 상태 / 테이블 스택 ─────────────────────────────────────────
+        from PySide6.QtWidgets import QStackedWidget
+        self._runs_stack = QStackedWidget()
+        self._runs_stack.addWidget(self._runs_table)         # idx 0
+        self._runs_stack.addWidget(self._build_runs_empty()) # idx 1
+        lay.addWidget(self._runs_stack)
+
         outer_lay.addWidget(card)
         return outer
+
+    def _build_runs_empty(self) -> QWidget:
+        """실행 이력이 없을 때 표시할 환영 화면 (CTA + 빠른 가이드)."""
+        w = QWidget()
+        w.setStyleSheet("background: transparent;")
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(40, 40, 40, 40)
+        lay.setSpacing(14)
+        lay.addStretch()
+
+        # 큰 아이콘
+        icon = QLabel("🎯")
+        icon.setStyleSheet(
+            "QLabel { font-size: 56px; background: transparent; border: none; }"
+        )
+        icon.setAlignment(Qt.AlignCenter)
+        lay.addWidget(icon)
+
+        # 제목
+        title = QLabel("AWT에 오신 것을 환영합니다")
+        title.setStyleSheet(
+            "QLabel { font-size: 20px; font-weight: 700; color: #1e293b;"
+            " background: transparent; border: none; }"
+        )
+        title.setAlignment(Qt.AlignCenter)
+        lay.addWidget(title)
+
+        # 부제
+        desc = QLabel(
+            "웹사이트 URL만 있으면 AI가 자동으로\n"
+            "테스트 케이스를 설계·실행·판정합니다."
+        )
+        desc.setStyleSheet(
+            "QLabel { font-size: 13px; color: #64748b; line-height: 1.5;"
+            " background: transparent; border: none; }"
+        )
+        desc.setAlignment(Qt.AlignCenter)
+        lay.addWidget(desc)
+
+        # 빠른 가이드 (3단계)
+        steps_box = QFrame()
+        steps_box.setMaximumWidth(560)
+        steps_box.setStyleSheet(
+            "QFrame { background: #f8fafc; border: 1px solid #e2e8f0;"
+            " border-radius: 8px; }"
+        )
+        s_lay = QVBoxLayout(steps_box)
+        s_lay.setContentsMargins(20, 14, 20, 14)
+        s_lay.setSpacing(8)
+        for n, txt in [
+            ("1", "URL과 요구사항 문서 입력"),
+            ("2", "로그인이 필요하면 인증 단계 설정"),
+            ("3", "AI 모델 선택 후 '실행 시작' — 끝!"),
+        ]:
+            row = QHBoxLayout()
+            row.setSpacing(10)
+            badge = QLabel(n)
+            badge.setFixedSize(22, 22)
+            badge.setAlignment(Qt.AlignCenter)
+            badge.setStyleSheet(
+                "QLabel { background: #3b82f6; color: #ffffff;"
+                " border-radius: 11px; font-size: 12px; font-weight: 700;"
+                " border: none; }"
+            )
+            row.addWidget(badge)
+            txt_lbl = QLabel(txt)
+            txt_lbl.setStyleSheet(
+                "QLabel { color: #334155; font-size: 13px;"
+                " background: transparent; border: none; }"
+            )
+            row.addWidget(txt_lbl)
+            row.addStretch()
+            s_lay.addLayout(row)
+        # 가운데 정렬용 wrapper
+        wrap = QHBoxLayout()
+        wrap.addStretch()
+        wrap.addWidget(steps_box)
+        wrap.addStretch()
+        lay.addLayout(wrap)
+
+        # 큰 CTA 버튼
+        cta_btn = QPushButton("＋  첫 실행 시작하기")
+        cta_btn.setFixedSize(220, 48)
+        cta_btn.setStyleSheet(
+            "QPushButton {"
+            " background: #3b82f6; color: #ffffff;"
+            " border: none; border-radius: 8px;"
+            " padding: 0 20px; font-size: 15px; font-weight: 600;"
+            "}"
+            "QPushButton:hover { background: #2563eb; }"
+        )
+        cta_btn.clicked.connect(self.new_run_requested)
+        cta_wrap = QHBoxLayout()
+        cta_wrap.addStretch()
+        cta_wrap.addWidget(cta_btn)
+        cta_wrap.addStretch()
+        lay.addLayout(cta_wrap)
+
+        lay.addStretch()
+        return w
 
     def _build_settings_tab(self) -> QWidget:
         outer = QWidget()
@@ -455,6 +562,11 @@ class Dashboard(QMainWindow):
                 self._runs_table.setItem(row, col_offset + 4, QTableWidgetItem(meta.get("created_at", "-")))
         finally:
             self._runs_table.blockSignals(False)
+        # 행 수에 따라 빈 상태 / 테이블 자동 전환
+        if hasattr(self, "_runs_stack"):
+            self._runs_stack.setCurrentIndex(
+                1 if self._runs_table.rowCount() == 0 else 0
+            )
         # 로드 후 삭제 버튼 상태 갱신
         if self._role == "admin":
             self._on_check_changed()
