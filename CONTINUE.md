@@ -6,6 +6,44 @@
 
 ## 1. 지금 어디까지 했나 (Last updated: 2026-05-31)
 
+### ✅ Phase A/B 실측 검증 + D66·D67·D68 (2026-05-31)
+
+**gnuboard5 실제 실행으로 Phase A/B 효과 정량 검증 (run `2c9b0cc4`):**
+
+| | 1차 (픽스처 X) | 2차 (픽스처 O) |
+|---|---|---|
+| PASS | 82 | 92 |
+| FAIL | 18 | 9 |
+| BLOCKED | 1 | 0 |
+| 강한 PASS (URL/상태 판정) | 61 | 68 |
+| exec_mode | D40_scenario 101/101 | 동일 |
+| execution_log | 101/101 | 동일 |
+
+**핵심 발견 — 진짜 제품 결함은 0건:**
+- 1차 자동 생성 결함 14건 → 2차 교차검증
+  - 7건 false positive (픽스처 부재가 원인) → 삭제
+  - 7건 재현 → 정밀 분석 결과 **전부 판정/시나리오 한계**(진짜 결함 아님)
+    - fictional_positive 2건 (INFERRED 동시성 시나리오, 자동화 재현 불가)
+    - scenario_error 4건 / selector_broken 1건
+- 결함 카탈로그는 PoC 시드 5건(001~005)만 유지
+
+**구현 (D66~D68):**
+
+| 결정 | 파일 | 내용 |
+|---|---|---|
+| **D66 Phase B** | `app/core/stage5_gnuboard.py` | 미커버 leaf 5개 실제 액션 (2.5삭제/6.1권한/6.2비밀글/8.1길이/8.2업로드) + assertion |
+| **D67** | `data/oss/gnuboard5/awt_fixture.php` (신규) | 픽스처 헬퍼 복원 — gnuboard5 내부함수로 계정/게시글 직접 생성 (CAPTCHA 우회, 로컬 전용) |
+| **D67** | `docker-compose.yml` | awt_fixture.php 마운트 |
+| **D67** | `scripts/install_gnuboard5.py` (신규) | 3단계 설치 마법사 자동화 |
+| **D68** | `app/core/stage6_enhance.py` | V6 경로 INFERRED 가드 — app_defect→real_defect 변환 시 source=INFERRED면 fictional_positive로 보정 |
+
+**남은 한계 (다음 작업 후보):**
+- 약한 PASS 24건: 여전히 키워드 fallback 의존
+- Phase B assertion 정밀도: 정보수정 confirm 단계, 삭제 버튼 인식, 8.3 비로그인 상태 시작 등 보강 필요
+- Stage 5 시나리오가 더 정밀해져야 진짜 결함 검출 가능
+
+---
+
 ### ✅ 4인 페르소나 토론 + D63·D64·D65 구현 (2026-05-31)
 
 4인 전문가 패널(UX/개발/QA/PM) 토론 결과 우선순위대로 즉시 구현:
@@ -314,26 +352,27 @@ Mock 파이프라인 재검증 결과 (2026-05-20):
 
 **→ 새 PC라면 `SETUP.md`를 먼저 읽어라.**
 
-### 최우선: Phase B — 미커버 leaf 확장
+### 최우선: Phase B assertion 정밀도 보강
 
-D64 Phase A(execution_log + 구조화 assertion) 구현 완료.
-다음은 Phase B — 현재 navigate만 하는 leaf에 실제 액션 추가:
+Phase A(D64)·Phase B 액션(D66)·픽스처(D67)·INFERRED 가드(D68) 완료.
+2차 실행에서 드러난 판정 한계를 보강해야 진짜 결함 검출이 가능:
 
-| 미커버 leaf | 추가할 액션 | 판정 방식 |
+| 보강 대상 | 현재 한계 | 개선 방향 |
 |---|---|---|
-| 6.1 레벨 기반 권한 | 낮은 레벨 계정으로 접근 제한 페이지 시도 | `redirect_to_login()` |
-| 6.2 비밀글 | 비밀글 작성 → 타인 계정으로 접근 | `text_present("비밀글")` |
-| 2.5 삭제 (negative) | 타인 게시글 삭제 버튼 접근 | `text_present("권한")` |
-| 8.1 입력 길이 | 최대 길이 초과 입력 시도 | `text_present("자 이내")` |
-| 8.2 파일 업로드 제한 | 제한 크기 초과 파일 업로드 | `text_present("용량")` |
+| 1.3 정보 수정 | member_confirm 비밀번호 확인 단계를 못 넘김 | `_action_member_form` confirm 후 register_form 도달 검증 |
+| 2.5 게시글 삭제 | 삭제 버튼 텍스트("삭제") 미인식 | gnuboard 삭제 셀렉터(`a[href*=act=delete]`) 가시성으로 판정 |
+| 8.3 중복 처리 | 로그인 상태로 register 접근→홈 리다이렉트 | `_required_login_state`에서 8.3을 "none"으로 |
+| 6.3 IP 차단 | IP 입력 액션 미구현(navigate만) | config_form의 IP 차단 textarea 입력+저장 |
+| 약한 PASS 24건 | 키워드 fallback 의존 | leaf별 URL/요소 assertion 추가 |
 
+**환경 재실행 (gnuboard5 설치+픽스처는 1회만):**
 ```powershell
-# gnuboard5 재시작 (컨테이너 이미 있을 때)
 docker compose -f data\oss\gnuboard5\docker-compose.yml up -d
-
-# Stage 4~7 재실행
-python scripts\run_stage47.py --url http://localhost:8080 --auth-id admin --auth-pw Gnuboard5!
+# 최초 설치 시: python scripts\install_gnuboard5.py --admin-pw "Gnuboard5!"
+python scripts\run_stage47.py --url http://localhost:8080 --auth-id admin --auth-pw "Gnuboard5!"
 ```
+
+### 그 다음: E — 공식 PDF 시험 성적서 / F — LLM 병렬화
 
 ---
 
