@@ -1,7 +1,39 @@
 # 다른 PC에서 이어 작업하기 — 환경 설정 + 현재 상태 인수인계
 
-> 작성: 2026-05-29 (커밋 `46068f3` 기준)
+> 작성: 2026-05-29 · 갱신: 2026-06-01 (커밋 `07f03c7` 기준)
 > 작업 PC가 바뀌어도 이 문서만 따라가면 동일한 상태로 복원 가능합니다.
+> **빠른 시작은 아래 §0 을 그대로 복사·실행하세요.**
+
+---
+
+## 0. 빠른 시작 (복사해서 그대로 실행)
+
+```powershell
+# 1) 클론 + 브랜치
+git clone https://github.com/TTAJihoon/AutoWebTesting.git AWT
+cd AWT
+git checkout AWT-claude
+git pull
+
+# 2) Python 환경
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+playwright install chromium
+
+# 3) .env 작성 (LLM 키 — Google 권장)
+Copy-Item .env.example .env
+notepad .env        # GOOGLE_API_KEY 채우기
+
+# 4) gnuboard5 시험 대상 기동 (Docker Desktop 실행 중이어야 함)
+docker compose -f data\oss\gnuboard5\docker-compose.yml up -d
+# data 디렉터리 생성 (최초 1회) + 설치 자동화 + 픽스처 생성
+docker exec gnuboard5_web bash -c "mkdir -p /app/data && chmod 707 /app/data"
+python scripts\install_gnuboard5.py --admin-pw "Gnuboard5!"
+
+# 5) Stage 4~7 파이프라인 실행 (Stage 1~3 산출물이 있을 때)
+python scripts\run_stage47.py --url http://localhost:8080 --auth-id admin --auth-pw "Gnuboard5!"
+```
 
 ---
 
@@ -96,17 +128,35 @@ AWT_DB_PASSWORD=changeme
 
 ---
 
-## 5. 시험 대상 서버 (GnuBoard5 데모)
+## 5. 시험 대상 서버 (GnuBoard5 데모) — 설치 자동화
 
-개발 중 로컬 시험 대상으로 GnuBoard5 Docker 컨테이너 사용:
+로컬 시험 대상으로 GnuBoard5 Docker 컨테이너 사용. **새 PC에서는 아래 순서로 0부터 자동 구축**됩니다.
 
 ```powershell
-# Docker Desktop이 실행 중이어야 함
-# 컨테이너는 restart: unless-stopped로 자동 재시작 설정됨
-# Docker Desktop 켜면 자동으로 localhost:8080에서 응답
+# (1) 컨테이너 기동 — db(MariaDB) + web(PHP-Apache). app/은 git clone으로 채워짐
+docker compose -f data\oss\gnuboard5\docker-compose.yml up -d
+
+# app/ 소스가 없으면 (최초 1회):
+#   git clone https://github.com/gnuboard/gnuboard5.git data\oss\gnuboard5\app
+
+# (2) data 업로드 디렉터리 생성 (설치 마법사 통과에 필요)
+docker exec gnuboard5_web bash -c "mkdir -p /app/data && chmod 707 /app/data"
+
+# (3) 웹 설치 3단계 마법사 자동 실행 (Playwright)
+python scripts\install_gnuboard5.py --admin-pw "Gnuboard5!"
+#   → DB: db / gnuboard5 / gnuboard / gnuboard,  관리자: admin / Gnuboard5!
 ```
 
-웹 접근: http://localhost:8080  ·  admin 계정: `admin / xxx` (개별 환경 확인)
+**픽스처 헬퍼 (`awt_fixture.php`) — 자동 마운트됨:**
+- `docker-compose.yml`이 `./awt_fixture.php:/app/awt_fixture.php:ro`로 마운트
+- Stage 5 실행 시 테스트 계정(`awt01`)·테스트 게시글을 gnuboard5 내부함수로 직접 생성 (CAPTCHA 우회)
+- ⚠️ 로컬/사설 IP 전용. 프로덕션 배포 금지
+- 정상 동작 확인: `Invoke-WebRequest "http://localhost:8080/awt_fixture.php?action=check_member&mb_id=awt01"` → JSON 응답
+
+웹 접근: http://localhost:8080  ·  admin: `admin / Gnuboard5!`  ·  test: `awt01 / Awt1234!`
+
+> **컨테이너는 `restart: unless-stopped`** — Docker Desktop만 켜면 localhost:8080 자동 응답.
+> 설치·픽스처는 DB 볼륨(`db_data`)이 유지되는 한 1회만 하면 됨.
 
 ---
 
@@ -123,6 +173,28 @@ python -m app.main
 4. PipelineView → "Stage 1~3 실행" → 페이지 선택 다이얼로그 → Stage 0~3 진행
 5. Reviewer Gate → 승인/수정/거부 결정 (필요 시 거부 TC AI 재생성)
 6. Stage 5~7 실행 → tc_final.xlsx 생성
+
+---
+
+## 7-A. Stage 5 실제 실행 + 결함 분류 정밀화 (D63 ~ D70, 2026-06-01)
+
+> 4인 페르소나 토론으로 도출. gnuboard5 5회 실측 검증. 모두 푸시 완료.
+
+| 결정 | 핵심 |
+|---|---|
+| **Feature D** | Stage 6B — real_defect TC → 결함 카탈로그 자동 피드백 (PATTERN_EXTRACT, 중복 방지) |
+| **D63** | FAILURE_ANALYSIS v2.1 — exec_mode(D39_keyword/D40_scenario)별 판정 우선순위 분리 |
+| **D64 (Phase A)** | execution_log 기록 + URL/요소 기반 구조화 assertion (키워드 매칭은 fallback) |
+| **D65** | tc_final.xlsx "커버리지" 시트 — leaf별 TC수·기법·결과 + 색상 경고 |
+| **D66 (Phase B)** | 미커버 leaf 5개 실제 액션 (2.5삭제/6.1권한/6.2비밀글/8.1길이/8.2업로드) |
+| **D67** | `awt_fixture.php` 픽스처 헬퍼 복원 + `install_gnuboard5.py` 설치 자동화 |
+| **D68** | V6 경로 INFERRED 가드 (가공명세 FAIL → fictional_positive) |
+| **D69** | Phase B assertion 정밀도 보강 (1.3/2.5/6.3/8.3) |
+| **D70** | execution_log 분류 게이트 — 중간 단계 실패면 real_defect 아닌 scenario_error/selector_broken |
+
+**5회 실측 추이:** PASS 82→96, FAIL 18→5, **결함 카탈로그 오탐 14→0**.
+**결론:** gnuboard5 자동 검출 진짜 제품 결함 = 0건 (FAIL 5건 전부 자동화 시나리오/셀렉터 한계).
+상세는 `CONTINUE.md` §1 참조.
 
 ---
 
@@ -187,9 +259,11 @@ python -m app.main
 | ✅ A | 최종 Excel 제한사항 시트 | 완료 (D61) |
 | ✅ B | Stage 중간 재개 UI | 완료 (D61) |
 | ✅ C | 거부 TC 재생성 | 완료 (D61) |
-| 🔲 D | 결함 카탈로그 자동 피드백 — 이번 run 결함을 자산으로 추가 | 미시작 |
-| 🔲 E | 공식 PDF 시험 성적서 템플릿 (발주처용) | 미시작 |
+| ✅ D | 결함 카탈로그 자동 피드백 | 완료 (Feature D + D68/D70 정밀화) |
+| 🔲 E | 공식 PDF 시험 성적서 템플릿 (발주처용) | **다음 1순위** |
 | 🔲 F | LLM 호출 병렬화 (유료 플랜 한정) | 미시작 |
+| 🔲 G | Stage 5 동시성·파일첨부 시나리오 | 진짜 결함 검출 영역 확대 (난이도 상) |
+| 🔲 H | 약한 PASS 24건 정밀도 (키워드 fallback → URL/요소 assertion) | 미시작 |
 
 ---
 

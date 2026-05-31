@@ -70,3 +70,6 @@ temp/
 
 # 외부 소스 (git clone으로 별도 관리)
 data/oss/gnuboard5/app/
+
+# Claude Code 로컬 세션/설정 (PC별 로컬, 공유 불필요)
+.claude/
