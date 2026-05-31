@@ -31,6 +31,33 @@ _V6_TO_D50: dict[str, str] = {
 }
 
 
+def _reclassify_real_defect_by_log(tc: dict) -> tuple[str, str] | None:
+    """[D70] real_defect로 분류되려는 TC의 execution_log를 검사해 오분류 교정.
+
+    Stage 5 실행 시 중간 단계(navigate/login_state/confirm/action 등 assert 제외)에
+    명시적 실패가 있으면, 이는 제품 결함이 아니라 자동화 시나리오·셀렉터 한계다.
+    V6 정적 분석은 셀렉터 점수만 보고 execution_log를 무시하므로 여기서 보정한다.
+
+    예: TC-003-001(confirm fail)·TC-026-001(register 폼 도달 실패) 등이
+        real_defect로 새어 결함 카탈로그를 오염시키는 것을 차단.
+
+    Returns:
+        (category, source) 교정값, 또는 None(앞 단계 모두 ok → real_defect 유지).
+    """
+    log = tc.get("execution_log", [])
+    if not log:
+        return None
+    for s in log:
+        if s.get("action") == "assert":
+            continue
+        if s.get("status") in ("fail", "blocked"):
+            act = s.get("action", "")
+            if act in ("navigate", "login_state"):
+                return ("selector_broken", "d70_log_access_fail")
+            return ("scenario_error", "d70_log_scenario_fail")
+    return None
+
+
 def enhance(
     tcs: list[dict],
     llm_client,
@@ -51,18 +78,27 @@ def enhance(
     needs_llm: list[dict] = []
     v6_resolved = 0
     inferred_guarded = 0
+    d70_guarded = 0
     for tc in failed:
         v6_cat = tc.get("failure_category", "")  # V6가 stage5 직후 채웠을 수 있음
         if v6_cat in _V6_TO_D50:
             mapped = _V6_TO_D50[v6_cat]
-            # [D68] INFERRED 가드: 가공된 명세(INFERRED)를 검증하는 TC가 FAIL이면
-            # 제품 결함(real_defect)이 아니라 fictional_positive로 판정해야 한다.
-            # V6 정적 분석은 source_quote를 보지 않으므로 여기서 보정 (판정 우선순위 1번).
-            if mapped == "real_defect" and \
-               str(tc.get("source_quote", "")).startswith("INFERRED"):
-                tc["failure_category"] = "fictional_positive"
-                tc["failure_category_source"] = "v6_static_inferred_guard"
-                inferred_guarded += 1
+            if mapped == "real_defect":
+                # [D68] INFERRED 가드: 가공된 명세를 검증하는 TC가 FAIL이면
+                # real_defect가 아니라 fictional_positive (판정 우선순위 1번).
+                if str(tc.get("source_quote", "")).startswith("INFERRED"):
+                    tc["failure_category"] = "fictional_positive"
+                    tc["failure_category_source"] = "v6_static_inferred_guard"
+                    inferred_guarded += 1
+                else:
+                    # [D70] execution_log 게이트: 중간 단계 실패면 real_defect 아님
+                    reclass = _reclassify_real_defect_by_log(tc)
+                    if reclass:
+                        tc["failure_category"], tc["failure_category_source"] = reclass
+                        d70_guarded += 1
+                    else:
+                        tc["failure_category"] = "real_defect"
+                        tc["failure_category_source"] = "v6_static"
             else:
                 tc["failure_category"] = mapped
                 tc["failure_category_source"] = "v6_static"
@@ -74,6 +110,8 @@ def enhance(
         _cb(f"  V6 사전 마킹: {v6_resolved}건 (LLM 호출 skip)")
     if inferred_guarded:
         _cb(f"  INFERRED 가드: {inferred_guarded}건 real_defect→fictional_positive 보정")
+    if d70_guarded:
+        _cb(f"  execution_log 게이트: {d70_guarded}건 real_defect→scenario/selector 보정")
 
     # 2) 나머지 — LLM FAILURE_ANALYSIS 호출
     for i, tc in enumerate(needs_llm, 1):
@@ -116,8 +154,16 @@ def enhance(
         # D50 enum 검증
         llm_cat = (result.get("failure_category", "") or "").strip()
         if llm_cat in _VALID_FAILURE_CATEGORIES:
-            tc["failure_category"] = llm_cat
-            tc["failure_category_source"] = "llm_failure_analysis"
+            # [D70] LLM이 real_defect로 판정해도 execution_log 중간 실패가 있으면 교정
+            reclass = (
+                _reclassify_real_defect_by_log(tc)
+                if llm_cat == "real_defect" else None
+            )
+            if reclass:
+                tc["failure_category"], tc["failure_category_source"] = reclass
+            else:
+                tc["failure_category"] = llm_cat
+                tc["failure_category_source"] = "llm_failure_analysis"
         else:
             # LLM이 enum 위반 또는 누락 — INFERRED 마킹
             tc["failure_category"] = "fictional_positive" if (

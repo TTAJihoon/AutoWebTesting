@@ -763,7 +763,7 @@ def _execute_action(
 
     # ─ 8.3 중복 처리 ─
     elif leaf == "8.3 중복 처리" and "아이디" in scenario:
-        _action_register_duplicate_id(page, base_url, fixtures)
+        _action_register_duplicate_id(page, tc, base_url, fixtures)
 
 
 # ── 개별 액션 구현 ──────────────────────────────────────────────────────────
@@ -1090,13 +1090,21 @@ def _action_search(page: Page, tc: dict, base_url: str) -> None:
 
 
 def _action_register_duplicate_id(
-    page: Page, base_url: str, fixtures: GnuboardFixtures
+    page: Page, tc: dict, base_url: str, fixtures: GnuboardFixtures
 ) -> None:
-    """중복 아이디로 회원가입 시도 — gnuboard5 2단계 흐름 사용."""
+    """중복 아이디로 회원가입 시도 — gnuboard5 2단계 흐름 사용.
+
+    폼 도달/제출 실패는 execution_log에 기록해 D70 게이트가
+    scenario_error로 분류하도록 한다 (real_defect 오분류 방지).
+    """
     try:
         _logout(page, base_url)
-        _fill_register_form(page, base_url, "admin", "Awt1234!",
-                            "중복테스트", email="dup2@awt-test.com", nick="중복테스터2")
+        ok = _fill_register_form(page, base_url, "admin", "Awt1234!",
+                                 "중복테스트", email="dup2@awt-test.com",
+                                 nick="중복테스터2")
+        if not ok:
+            _log(tc, "register_dup", "admin", "fail",
+                 detail="중복가입 폼 도달/제출 실패 (약관 또는 AJAX 단계)")
     except Exception:
         pass
 
