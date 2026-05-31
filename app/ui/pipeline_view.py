@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QLabel, QPushButton, QPlainTextEdit, QLineEdit,
     QSplitter, QTableWidget, QTableWidgetItem, QHeaderView,
     QMessageBox, QStatusBar, QFileDialog, QDialog, QSystemTrayIcon,
-    QApplication, QStyle,
+    QApplication, QStyle, QCheckBox,
 )
 
 from app.core.orchestrator import Orchestrator, RunConfig
@@ -504,6 +504,24 @@ class PipelineView(QMainWindow):
         self._spinner_timer.timeout.connect(self._tick_spinner)
         self._elapsed_start: float | None = None
 
+        # ── 자동 실행 옵션 (Stage 5 실행 직전까지 자유롭게 변경 가능) ──────────
+        # 마법사 Step 3에서 정한 기본값을 여기서 덮어쓸 수 있음.
+        # 브라우저 특성상 헤드리스/헤드풀은 실행 시작 시점에 고정되므로
+        # "Stage 5~7 실행"을 누르기 직전까지 변경 가능 (실행 도중 변경은 불가).
+        self._headless_cb = QCheckBox("브라우저 표시")
+        self._headless_cb.setChecked(not self._config.headless_exec)
+        self._headless_cb.setVisible(False)
+        self._headless_cb.setToolTip(
+            "체크: Stage 5 실행 시 별도 Chromium 창에서 동작이 보임 (사용자 마우스/키보드와 분리)\n"
+            "해제: 백그라운드 헤드리스 — 빠름\n"
+            "※ 실행 시작 직전까지 변경 가능 (실행 도중에는 변경되지 않음)"
+        )
+        self._headless_cb.setStyleSheet(
+            "QCheckBox { font-size: 12px; color: #475569; }"
+        )
+        self._headless_cb.toggled.connect(self._on_headless_toggled)
+        bot_lay.addWidget(self._headless_cb)
+
         # Stage 5~7 대기/실행 버튼 (Stage 3 완료 후 표시)
         self._exec_btn = QPushButton("Stage 5~7 대기")
         self._exec_btn.setEnabled(False)
@@ -861,6 +879,7 @@ class PipelineView(QMainWindow):
         self._run_btn.setVisible(False)
         self._exec_btn.setVisible(True)
         self._exec_btn.setEnabled(False)
+        self._headless_cb.setVisible(True)   # 자동 실행 옵션 노출
         self._gate_btn.setVisible(True)
         self._gate_btn.setEnabled(True)
         # Stage 0 스캔 결과 있으면 기능목록(Excel/CSV) + 스크린샷 폴더 버튼 표시
@@ -898,9 +917,12 @@ class PipelineView(QMainWindow):
     # ── Stage 5~7 (Post-Gate) ─────────────────────────────────────────────────
     def _start_post_gate(self) -> None:
         self._exec_btn.setEnabled(False)
+        # 실행이 시작되면 브라우저 모드는 더 이상 못 바꿈 → 체크박스 잠금
+        self._headless_cb.setEnabled(False)
+        mode = "브라우저 표시(헤드풀)" if not self._config.headless_exec else "백그라운드(헤드리스)"
         self._update_circles(5, "Stage 5~7 실행 중")
         self._set_status("Stage 5~7 실행 중")
-        self._append_log("Stage 5~7 시작...")
+        self._append_log(f"Stage 5~7 시작... (자동 실행 모드: {mode})")
 
         # 일시정지/중단 버튼 노출 + 플래그 리셋
         self._orch.set_paused(False)
@@ -916,6 +938,13 @@ class PipelineView(QMainWindow):
         self._post_worker.error.connect(self._on_error)
         self._post_worker.defects_found.connect(self._on_defects_found)
         self._post_worker.start()
+
+    # ── 자동 실행 옵션 토글 ───────────────────────────────────────────────
+    def _on_headless_toggled(self, show_browser: bool) -> None:
+        """브라우저 표시 체크박스 → config.headless_exec 갱신 (Stage 5 시작 시 반영)."""
+        self._config.headless_exec = not show_browser
+        mode = "브라우저 표시(헤드풀)" if show_browser else "백그라운드(헤드리스)"
+        self._append_log(f"⚙ 자동 실행 모드 변경: {mode} (다음 Stage 5 실행부터 적용)")
 
     # ── 일시정지 / 중단 ───────────────────────────────────────────────────
     def _toggle_pause(self, paused: bool) -> None:
@@ -949,10 +978,11 @@ class PipelineView(QMainWindow):
         """stage_done emit: n = 방금 완료된 단계(5~7). n+1이 다음 활성."""
         badges = {5: "Stage 6 실행 중", 6: "Stage 7 실행 중", 7: "모든 단계 완료"}
         self._update_circles(n + 1, badges.get(n, ""))
-        # Stage 5 완료 후에는 일시정지/중단 버튼 더 이상 의미 없음 → 숨김
+        # Stage 5 완료 후에는 일시정지/중단/자동실행옵션 더 이상 의미 없음 → 숨김
         if n >= 5:
             self._pause_btn.setVisible(False)
             self._stop_btn.setVisible(False)
+            self._headless_cb.setVisible(False)
 
     def _on_defects_found(self, count: int) -> None:
         """Stage 6B 완료 — 결함 카탈로그 신규 항목 알림."""

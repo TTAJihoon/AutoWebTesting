@@ -147,6 +147,7 @@ def main() -> None:
                 pv._gate_btn.setEnabled(True)
                 pv._exec_btn.setVisible(True)
                 pv._exec_btn.setEnabled(False)
+                pv._headless_cb.setVisible(True)
                 pv._refresh_tc_table()
                 # Stage 0 산출물 있으면 다운로드 버튼 노출
                 if (pv._orch.run_dir / "dom-scan" / "feature-spec-draft.json").exists():
@@ -168,6 +169,7 @@ def main() -> None:
                 pv._exec_btn.setVisible(True)
                 pv._exec_btn.setEnabled(True)
                 pv._exec_btn.setText("Stage 5~7 실행")
+                pv._headless_cb.setVisible(True)
                 pv._refresh_tc_table()
                 if (pv._orch.run_dir / "dom-scan" / "feature-spec-draft.json").exists():
                     pv._feature_dl_btn.setVisible(True)

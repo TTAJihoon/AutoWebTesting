@@ -89,12 +89,20 @@ def get_active_provider() -> str:
 
 
 def set_active_provider(provider: str) -> None:
-    """활성 provider 전환. 키는 그대로 보존."""
+    """활성 provider 전환. 키는 그대로 보존.
+
+    중요: .env의 LLM_PROVIDER는 '시작 시 기본값'일 뿐, 사용자가 UI에서 명시적으로
+    전환하면 그 선택이 이번 세션에서 우선해야 한다. get_active_provider()가
+    os.environ을 최우선으로 읽으므로, 여기서 os.environ도 함께 갱신해
+    UI 전환이 즉시 반영되게 한다.
+    """
     if provider not in VALID_PROVIDERS:
         raise ValueError(f"Unknown provider: {provider}. Use one of {VALID_PROVIDERS}")
     data = _load_payload()
     data["active_provider"] = provider
     _save_payload(data)
+    # .env 기본값을 덮어써 UI 선택이 우선되도록 (현재 프로세스 한정)
+    os.environ["LLM_PROVIDER"] = provider
 
 
 def save_api_key(api_key: str, provider: str | None = None) -> None:
@@ -107,6 +115,8 @@ def save_api_key(api_key: str, provider: str | None = None) -> None:
     # 활성 provider도 갱신 (UI에서 키 저장은 보통 그 provider를 쓴다는 의미)
     data["active_provider"] = provider
     _save_payload(data)
+    # UI에서 키를 저장하면 그 provider로 전환하겠다는 의미 — env도 갱신
+    os.environ["LLM_PROVIDER"] = provider
 
 
 def load_api_key(provider: str | None = None) -> str | None:

@@ -74,8 +74,14 @@ class Dashboard(QMainWindow):
         """런닝 중인 run이 있을 때만 새로고침 (UX/성능 절충).
 
         모든 run이 종료(stage=done) 상태면 굳이 갱신할 필요 없음.
+        사용자가 체크박스로 삭제 대상을 고르는 중이면 새로고침을 건너뛴다
+        (선택이 날아가는 것을 방지 — _load_runs가 체크를 복원하지만
+         진행 중 깜빡임/포커스 변화를 줄이기 위해 아예 스킵).
         """
         try:
+            # admin이 체크박스로 선택 중이면 새로고침 보류
+            if self._role == "admin" and self._collect_checked_rows():
+                return
             # 빠른 검사: meta.json들을 살펴서 진행 중인 게 있는지
             in_progress = False
             if RUNS_DIR.exists():
@@ -261,10 +267,11 @@ class Dashboard(QMainWindow):
         self._runs_table.doubleClicked.connect(self._open_run)
         self._runs_table.setContextMenuPolicy(Qt.CustomContextMenu)
         self._runs_table.customContextMenuRequested.connect(self._on_runs_context_menu)
+        # shift+click 범위 선택용 — 마지막 클릭 행 추적
+        self._last_check_row: int = -1
         # admin: 체크박스 변경/선택 시 삭제 버튼 활성화
         if self._role == "admin":
-            self._runs_table.itemSelectionChanged.connect(self._on_run_selection_changed)
-            self._runs_table.itemChanged.connect(self._on_check_changed)
+            self._runs_table.itemChanged.connect(self._on_check_item_changed)
         self._runs_table.setStyleSheet(
             "QTableWidget { border: none; background: #ffffff; }"
             "QHeaderView::section { background-color: #f8fafc; color: #64748b;"
@@ -557,6 +564,15 @@ class Dashboard(QMainWindow):
 
     # ── 데이터 로딩 ──────────────────────────────────────────────────────
     def _load_runs(self) -> None:
+        # 재로딩 전 체크된 run_id 보존 (자동 새로고침에 선택이 날아가지 않도록)
+        checked_ids: set[str] = set()
+        if self._role == "admin":
+            for r in range(self._runs_table.rowCount()):
+                chk = self._runs_table.item(r, 0)
+                rid_item = self._runs_table.item(r, self._runid_col)
+                if chk is not None and rid_item is not None and chk.checkState() == Qt.Checked:
+                    checked_ids.add(rid_item.text())
+
         # itemChanged 폭탄 방지
         self._runs_table.blockSignals(True)
         try:
@@ -585,12 +601,14 @@ class Dashboard(QMainWindow):
 
                 col_offset = 0
                 if is_admin:
-                    # 열 0: 체크박스
+                    # 열 0: 체크박스 (이전에 체크돼 있던 run이면 유지)
                     chk = QTableWidgetItem()
                     chk.setFlags(
                         Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable
                     )
-                    chk.setCheckState(Qt.Unchecked)
+                    chk.setCheckState(
+                        Qt.Checked if run_dir.name in checked_ids else Qt.Unchecked
+                    )
                     chk.setTextAlignment(Qt.AlignCenter)
                     self._runs_table.setItem(row, 0, chk)
                     col_offset = 1
@@ -626,8 +644,38 @@ class Dashboard(QMainWindow):
         # admin: 체크박스 우선, 선택 행은 대체 트리거
         self._on_check_changed()
 
+    def _on_check_item_changed(self, item) -> None:
+        """체크박스 변경 핸들러 — shift+click 시 범위 다중 선택 (기존 체크 유지)."""
+        if self._role != "admin" or item is None or item.column() != 0:
+            self._on_check_changed()
+            return
+
+        row = item.row()
+        target_state = item.checkState()
+
+        mods = QApplication.keyboardModifiers()
+        if (
+            (mods & Qt.ShiftModifier)
+            and self._last_check_row >= 0
+            and self._last_check_row != row
+        ):
+            lo, hi = sorted([self._last_check_row, row])
+            self._runs_table.blockSignals(True)
+            try:
+                for r in range(lo, hi + 1):
+                    if r == row:
+                        continue
+                    chk = self._runs_table.item(r, 0)
+                    if chk is not None:
+                        chk.setCheckState(target_state)
+            finally:
+                self._runs_table.blockSignals(False)
+
+        self._last_check_row = row
+        self._on_check_changed()
+
     def _on_check_changed(self, _item=None) -> None:
-        """체크박스 변경 시 삭제 버튼 활성화/비활성화 + 라벨에 개수 표시."""
+        """삭제 버튼 활성화/비활성화 + 라벨에 개수 표시."""
         if self._role != "admin":
             return
         checked_rows = self._collect_checked_rows()
