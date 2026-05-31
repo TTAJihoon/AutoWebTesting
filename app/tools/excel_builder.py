@@ -46,6 +46,16 @@ _FEATURE_COL_WIDTHS = {
     "screenshot_file": 30,
 }
 
+_TECHNIQUE_SHORT: dict[str, str] = {
+    "happy_path":       "정상",
+    "negative_basic":   "오류",
+    "negative_deep":    "심층오류",
+    "boundary":         "경계",
+    "equivalence":      "동등분할",
+    "state_transition": "상태전이",
+    "cross_feature":    "기능간연계",
+}
+
 _CONFIDENCE_FILLS = {
     "high": PatternFill(fill_type="solid", fgColor="C6EFCE"),  # 연두
     "mid":  PatternFill(fill_type="solid", fgColor="FFEB9C"),  # 노랑
@@ -124,6 +134,11 @@ def build(
     ws2 = wb.create_sheet("AWT_Meta")
     _write_sheet(ws2, _META_COLS, tcs, confidence_col="gen_confidence")
 
+    # ── (D65) TC-Leaf 커버리지 매트릭스 시트 ────────────────────────────
+    if tcs:
+        ws_cov = wb.create_sheet("커버리지")
+        _write_coverage_matrix_sheet(ws_cov, tcs)
+
     # ── (D60+) 제한사항 시트 — 박정훈 시험 인증 권고 ─────────────────────
     if meta is not None:
         ws3 = wb.create_sheet("제한사항")
@@ -133,6 +148,136 @@ def build(
     out.parent.mkdir(parents=True, exist_ok=True)
     wb.save(str(out))
     return out
+
+
+def _write_coverage_matrix_sheet(ws, tcs: list[dict]) -> None:
+    """TC-Leaf 커버리지 매트릭스 (D65).
+
+    소분류별 TC 수·설계기법 분포·실행결과를 한 눈에 보여주고
+    TC 수 부족 leaf를 색상으로 경고한다.
+    """
+    from collections import defaultdict
+
+    # ── leaf별 집계 ────────────────────────────────────────────────────
+    leaf_data: dict[str, dict] = {}
+    for tc in tcs:
+        leaf = tc.get("소분류") or "(소분류 없음)"
+        if leaf not in leaf_data:
+            leaf_data[leaf] = {
+                "requirement_id": tc.get("requirement_id", ""),
+                "중분류":         tc.get("중분류", ""),
+                "tc_ids":         [],
+                "techniques":     defaultdict(int),
+                "results":        defaultdict(int),
+            }
+        d = leaf_data[leaf]
+        tc_id = tc.get("tc_id", "")
+        if tc_id:
+            d["tc_ids"].append(tc_id)
+        tech = tc.get("design_technique", "")
+        if tech:
+            d["techniques"][tech] += 1
+        result = tc.get("result", "")
+        if result and result not in ("not_executed", ""):
+            d["results"][result] += 1
+
+    sorted_leaves = sorted(
+        leaf_data.items(),
+        key=lambda x: (x[1].get("requirement_id", ""), x[0]),
+    )
+
+    # ── 헤더 ──────────────────────────────────────────────────────────
+    COL_DEFS = [
+        ("Leaf ID",      10),
+        ("소분류",        24),
+        ("중분류",        18),
+        ("TC 수",          8),
+        ("설계기법 분포", 32),
+        ("실행 결과",     22),
+        ("TC ID 목록",    50),
+        ("커버리지",      14),
+    ]
+    for ci, (h, w) in enumerate(COL_DEFS, 1):
+        cell = ws.cell(row=1, column=ci, value=h)
+        _header_style(cell, fill_color="1E6B3C")
+        ws.column_dimensions[get_column_letter(ci)].width = w
+    ws.freeze_panes = "A2"
+
+    FILL_OK      = PatternFill("solid", fgColor="C6EFCE")  # 연두 — 충분 (4개+)
+    FILL_CAUTION = PatternFill("solid", fgColor="FFEB9C")  # 노랑 — 적음 (2~3개)
+    FILL_WARN    = PatternFill("solid", fgColor="FFC7CE")  # 빨강 — 부족 (0~1개)
+    FONT_WARN    = Font(bold=True, color="9B1C1C", size=10)
+
+    # ── 데이터 행 ──────────────────────────────────────────────────────
+    for ri, (leaf, d) in enumerate(sorted_leaves, 2):
+        tc_count = len(d["tc_ids"])
+
+        tech_str = " / ".join(
+            f"{_TECHNIQUE_SHORT.get(k, k)}:{v}"
+            for k, v in sorted(d["techniques"].items(), key=lambda x: -x[1])
+        ) or "—"
+
+        result_str = " / ".join(
+            f"{k}:{v}" for k, v in sorted(d["results"].items())
+        ) or "미실행"
+
+        tc_ids_preview = d["tc_ids"][:12]
+        tc_str = ", ".join(tc_ids_preview)
+        if len(d["tc_ids"]) > 12:
+            tc_str += f"  … 외 {len(d['tc_ids']) - 12}개"
+
+        if tc_count == 0:
+            coverage_label, fill = "없음", FILL_WARN
+        elif tc_count == 1:
+            coverage_label, fill = "부족 (1개)", FILL_WARN
+        elif tc_count <= 3:
+            coverage_label, fill = f"적음 ({tc_count}개)", FILL_CAUTION
+        else:
+            coverage_label, fill = f"충분 ({tc_count}개)", FILL_OK
+
+        row_vals = [
+            d.get("requirement_id", ""),
+            leaf,
+            d.get("중분류", ""),
+            tc_count,
+            tech_str,
+            result_str,
+            tc_str,
+            coverage_label,
+        ]
+        for ci, val in enumerate(row_vals, 1):
+            cell = ws.cell(row=ri, column=ci, value=val)
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+            cell.border = _BORDER
+
+        # TC 수 셀 + 커버리지 셀에 색상
+        ws.cell(row=ri, column=4).fill = fill
+        cov_cell = ws.cell(row=ri, column=8)
+        cov_cell.fill = fill
+        if tc_count <= 1:
+            cov_cell.font = FONT_WARN
+
+    ws.auto_filter.ref = ws.dimensions
+
+    # ── 요약 (하단) ────────────────────────────────────────────────────
+    total  = len(sorted_leaves)
+    n_ok   = sum(1 for _, d in sorted_leaves if len(d["tc_ids"]) >= 4)
+    n_caut = sum(1 for _, d in sorted_leaves if 2 <= len(d["tc_ids"]) <= 3)
+    n_warn = total - n_ok - n_caut
+    n_tc   = sum(len(d["tc_ids"]) for _, d in sorted_leaves)
+
+    sr = total + 3
+    ws.cell(row=sr,   column=1, value="요약").font = Font(bold=True, size=11)
+    for offset, (label, f) in enumerate([
+        (f"전체 leaf {total}개  /  총 TC {n_tc}개",         None),
+        (f"커버리지 충분 (TC 4개 이상): {n_ok}개",          FILL_OK),
+        (f"커버리지 적음 (TC 2~3개): {n_caut}개",           FILL_CAUTION),
+        (f"커버리지 부족 (TC 0~1개): {n_warn}개 — 보완 필요", FILL_WARN),
+    ], 1):
+        cell = ws.cell(row=sr + offset, column=2, value=label)
+        cell.font = Font(bold=(f is not None), size=10)
+        if f:
+            cell.fill = f
 
 
 def _write_limitations_sheet(ws, tcs: list[dict], meta: dict) -> None:

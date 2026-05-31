@@ -4,7 +4,49 @@
 
 ---
 
-## 1. 지금 어디까지 했나 (Last updated: 2026-05-20)
+## 1. 지금 어디까지 했나 (Last updated: 2026-05-31)
+
+### ✅ 4인 페르소나 토론 + D63·D64·D65 구현 (2026-05-31)
+
+4인 전문가 패널(UX/개발/QA/PM) 토론 결과 우선순위대로 즉시 구현:
+
+| 결정 | 파일 | 내용 |
+|---|---|---|
+| **Feature D** | `app/core/stage6b_defect_feedback.py` (신규) | real_defect TC → 결함 카탈로그 자동 피드백. PATTERN_EXTRACT 호출, suggestedInvariant YAML 추가, 중복 TC ID 체크 |
+| **Feature D** | `app/assets/defect_catalog.py` | `next_defect_id()` 추가 (DEF-YYYY-BRD-NNN 자동 채번) |
+| **Feature D** | `app/ui/pipeline_view.py` | `defects_found` 시그널 + 트레이 알림 |
+| **D63** | `prompts/failure_analysis.md` v2.1 | `exec_mode` 필드 추가, D39/D40 모드별 판정 우선순위 분리 |
+| **D63** | `app/core/stage5_execute.py` | `tc["exec_mode"]` 기록 (D39_keyword_match / D40_scenario) |
+| **D63** | `app/core/stage6_enhance.py` | exec_mode → LLM 전달 |
+| **D64** | `app/core/stage5_gnuboard.py` | `_log()` / `_structured_assert()` / `_format_actual()` 추가, `execute_tc()` 개선 |
+| **D64** | `app/core/stage6_enhance.py` | execution_log → LLM actual_output으로 사용 |
+| **D65** | `app/tools/excel_builder.py` | `커버리지` 시트 자동 생성 (TC-Leaf 매트릭스, 색상 경고) |
+
+**커버리지 시트 내용:**
+- 소분류별 TC 수 / 설계기법 분포 / 실행 결과
+- 연두(4개+) / 노랑(2~3개) / 빨강(0~1개) 색상 경고
+- 하단 요약: 전체 leaf 수 / TC 수 / 커버리지 등급별 개수
+
+**재실행 방법:**
+```powershell
+# gnuboard5 컨테이너 구동 확인
+docker compose -f data\oss\gnuboard5\docker-compose.yml ps
+
+# Stage 4~7 재개 (기존 tc_verified.json 있을 때)
+python scripts\run_stage47.py --url http://localhost:8080 --auth-id admin --auth-pw Gnuboard5!
+```
+
+---
+
+### ⏸ 다음 예정 (우선순위 순)
+
+| 순위 | 항목 | 예상 기간 |
+|---|---|---|
+| 1 | **Phase B** — 미커버 leaf 확장 (6.1/6.2/2.5 negative/8.1/8.2) | 2주 |
+| 2 | **E** — 공식 PDF 시험 성적서 템플릿 | 미정 |
+| 3 | **F** — LLM 호출 병렬화 (유료 플랜 한정) | 미정 |
+
+---
 
 ### ✅ Phase 2 end-to-end 완료 — Stage 0~7 전체 검증 (2026-05-21)
 
@@ -272,7 +314,30 @@ Mock 파이프라인 재검증 결과 (2026-05-20):
 
 **→ 새 PC라면 `SETUP.md`를 먼저 읽어라.**
 
-### 최우선: Phase 2 — Stage 4 Reviewer Gate → Stage 5~7 실행
+### 최우선: Phase B — 미커버 leaf 확장
+
+D64 Phase A(execution_log + 구조화 assertion) 구현 완료.
+다음은 Phase B — 현재 navigate만 하는 leaf에 실제 액션 추가:
+
+| 미커버 leaf | 추가할 액션 | 판정 방식 |
+|---|---|---|
+| 6.1 레벨 기반 권한 | 낮은 레벨 계정으로 접근 제한 페이지 시도 | `redirect_to_login()` |
+| 6.2 비밀글 | 비밀글 작성 → 타인 계정으로 접근 | `text_present("비밀글")` |
+| 2.5 삭제 (negative) | 타인 게시글 삭제 버튼 접근 | `text_present("권한")` |
+| 8.1 입력 길이 | 최대 길이 초과 입력 시도 | `text_present("자 이내")` |
+| 8.2 파일 업로드 제한 | 제한 크기 초과 파일 업로드 | `text_present("용량")` |
+
+```powershell
+# gnuboard5 재시작 (컨테이너 이미 있을 때)
+docker compose -f data\oss\gnuboard5\docker-compose.yml up -d
+
+# Stage 4~7 재실행
+python scripts\run_stage47.py --url http://localhost:8080 --auth-id admin --auth-pw Gnuboard5!
+```
+
+---
+
+### (구) Phase 2 — Stage 4 Reviewer Gate → Stage 5~7 실행
 
 **Stage 1~3 완료** — 다음 단계:
 
