@@ -1099,12 +1099,21 @@ def _action_register_duplicate_id(
     """
     try:
         _logout(page, base_url)
-        ok = _fill_register_form(page, base_url, "admin", "Awt1234!",
-                                 "중복테스트", email="dup2@awt-test.com",
-                                 nick="중복테스터2")
-        if not ok:
+        _fill_register_form(page, base_url, "admin", "Awt1234!",
+                            "중복테스트", email="dup2@awt-test.com",
+                            nick="중복테스터2")
+        # _fill_register_form은 f.submit() navigation 성공만으로 True를 반환하므로
+        # 반환값이 아니라 '중복 차단 메시지'가 실제로 떴는지로 판정한다.
+        try:
+            body = page.inner_text("body") or ""
+        except Exception:
+            body = ""
+        if any(k in body for k in ["이미 사용", "이미 존재", "이미 등록", "중복된"]):
+            _log(tc, "register_dup", "admin", "ok",
+                 detail="중복 아이디 차단 메시지 확인")
+        else:
             _log(tc, "register_dup", "admin", "fail",
-                 detail="중복가입 폼 도달/제출 실패 (약관 또는 AJAX 단계)")
+                 detail="중복 검증 메시지 없음 (약관/AJAX 단계 미완성)")
     except Exception:
         pass
 
@@ -1630,6 +1639,18 @@ def _structured_assert(page: Page, tc: dict) -> tuple[str, str]:
         b = body()
         if any(kw in b for kw in ["파일", "첨부", "업로드", "용량", "크기"]):
             return "pass", f"파일 업로드 UI/제한 정보 확인"
+
+    # ── 8.3 중복 처리 ──────────────────────────────────────────────────────
+    if leaf == "8.3 중복 처리":
+        log = tc.get("execution_log", [])
+        dup = next((s for s in log if s["action"] == "register_dup"), None)
+        if dup and dup["status"] == "ok":
+            return "pass", "중복 아이디 차단 메시지 확인"
+        b = body()
+        if any(kw in b for kw in ["이미 사용", "이미 존재", "이미 등록", "중복된"]):
+            return "pass", "중복 아이디 오류 메시지 확인"
+        if dup and dup["status"] == "fail":
+            return "fail", "중복 검증 시나리오 미완성 (약관/AJAX 단계)"
 
     # ── fallback: 기존 keyword match ─────────────────────────────────────
     return _verify_expected(page, tc)
