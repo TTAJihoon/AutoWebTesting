@@ -1,10 +1,14 @@
-"""Stage 6 — 실패 TC 원인 분석 (LLM FAILURE_ANALYSIS v2.0 호출).
+"""Stage 6 — 실패 TC 원인 분석 (LLM FAILURE_ANALYSIS v2.1 호출).
 
 v2.0 변경 (D50):
 - failure_category 5enum 강제: selector_broken / scenario_error / expected_mismatch /
                               real_defect / fictional_positive
 - V6 정적 분석 결과 우선 (이미 마킹된 TC는 LLM 호출 skip)
 - LLM 응답이 enum 위반 시 INFERRED 마킹
+
+v2.1 변경 (D63):
+- exec_mode 필드 전달: D39_keyword_match vs D40_scenario
+- D39 모드에서 real_defect 과다 판정 억제 (프롬프트 측 우선순위 재조정)
 """
 from __future__ import annotations
 from typing import Callable
@@ -61,8 +65,10 @@ def enhance(
     # 2) 나머지 — LLM FAILURE_ANALYSIS 호출
     for i, tc in enumerate(needs_llm, 1):
         _cb(f"  분석 중 ({i}/{len(needs_llm)}): {tc['tc_id']}")
+        exec_mode = tc.get("exec_mode", "D39_keyword_match")
         result = llm_client.call("FAILURE_ANALYSIS", {
             "tc_id": tc["tc_id"],
+            "exec_mode": exec_mode,
             "scenario": tc.get("scenario", "")[:200],
             "precondition": tc.get("precondition", "")[:300],
             "expected_output": tc.get("expected", "")[:300],

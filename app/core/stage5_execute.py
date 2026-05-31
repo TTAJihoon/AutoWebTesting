@@ -98,6 +98,7 @@ def execute(
                     _cb(f"⏹  사용자가 중단 요청 — {i-1}/{len(runnable)}개 실행 후 종료")
                     break
                 _cb(f"  실행 ({i}/{len(runnable)}): {tc['tc_id']} [{tc.get('소분류','')}]")
+                tc["exec_mode"] = "D40_scenario"
                 gb_execute_tc(page, tc, base_url, fixtures, cb=_cb)
 
         else:
@@ -108,6 +109,7 @@ def execute(
                     _cb(f"⏹  사용자가 중단 요청 — {i-1}/{len(runnable)}개 실행 후 종료")
                     break
                 _cb(f"  실행 중 ({i}/{len(runnable)}): {tc['tc_id']}")
+                tc["exec_mode"] = "D39_keyword_match"
                 _run_tc(page, tc, base_url)
 
         browser.close()
