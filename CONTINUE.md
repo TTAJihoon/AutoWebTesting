@@ -4,7 +4,41 @@
 
 ---
 
-## 1. 지금 어디까지 했나 (Last updated: 2026-05-31)
+## 1. 지금 어디까지 했나 (Last updated: 2026-06-01)
+
+### ✅ D69·D70 — Phase B 보강 + 분류 게이트 (카탈로그 오탐 0 달성) (2026-06-01)
+
+**5회 반복 실행으로 결함 카탈로그 오탐을 0으로 수렴 (run `2c9b0cc4`):**
+
+| | 1차 | 2차 | 3차 | 4차 | 5차 |
+|---|---|---|---|---|---|
+| PASS | 82 | 92 | 96 | 96 | 96 |
+| FAIL | 18 | 9 | 5 | 5 | 5 |
+| 카탈로그 오탐 | 14 | 7 | 2 | 1 | **0** |
+
+**D69 (Phase B assertion 보강, `stage5_gnuboard.py`):**
+- 2.5 삭제(셀렉터 `a[onclick^=del]`), 6.3 IP차단(`_action_ip_block`), 1.3 정보수정(confirm 로그), 8.3 중복(메시지 기반 판정)
+- FAIL 9→5
+
+**D70 (execution_log 분류 게이트, `stage6_enhance.py`):**
+- `_reclassify_real_defect_by_log()`: real_defect 판정 전 execution_log 검사
+  - navigate/login_state fail → selector_broken
+  - confirm/action 등 fail → scenario_error
+  - 중간 단계 모두 ok → real_defect 유지
+- V6 경로 + LLM 경로 양쪽 적용 → **자동화 한계가 real_defect로 새는 것 차단**
+
+**최종 결론 — gnuboard5 자동 검출 진짜 제품 결함 = 0건:**
+- FAIL 5건 전부 자동화 시나리오/셀렉터 한계 또는 INFERRED(가공명세)
+- 결함 카탈로그는 PoC 시드 5건(001~005)만 유지 (오탐 누적 없음)
+- 진짜 결함을 잡으려면 Stage 5 시나리오가 동시성/파일첨부까지 커버해야 함 (구조적 한계)
+
+**남은 FAIL 5건 (전부 진짜 결함 아님, 검수 게이트에서 거절 대상):**
+- TC-003-001 (1.3): member_confirm 비번확인 폼 제출 자동화 미통과 → scenario_error
+- TC-026-001 (8.3): 중복 아이디 약관/AJAX 단계 미완성 → scenario_error
+- TC-006-005·010-003 (동시성, INFERRED) → fictional_positive
+- TC-011-001 (2.7 파일첨부): 실제 파일 업로드 미구현
+
+---
 
 ### ✅ Phase A/B 실측 검증 + D66·D67·D68 (2026-05-31)
 
@@ -352,18 +386,17 @@ Mock 파이프라인 재검증 결과 (2026-05-20):
 
 **→ 새 PC라면 `SETUP.md`를 먼저 읽어라.**
 
-### 최우선: Phase B assertion 정밀도 보강
+### 다음 작업 후보
 
-Phase A(D64)·Phase B 액션(D66)·픽스처(D67)·INFERRED 가드(D68) 완료.
-2차 실행에서 드러난 판정 한계를 보강해야 진짜 결함 검출이 가능:
+Phase A(D64)·Phase B 액션(D66)·픽스처(D67)·INFERRED 가드(D68)·
+Phase B 보강(D69)·분류 게이트(D70) 완료. 결함 카탈로그 오탐 0 수렴.
 
-| 보강 대상 | 현재 한계 | 개선 방향 |
+| # | 항목 | 설명 |
 |---|---|---|
-| 1.3 정보 수정 | member_confirm 비밀번호 확인 단계를 못 넘김 | `_action_member_form` confirm 후 register_form 도달 검증 |
-| 2.5 게시글 삭제 | 삭제 버튼 텍스트("삭제") 미인식 | gnuboard 삭제 셀렉터(`a[href*=act=delete]`) 가시성으로 판정 |
-| 8.3 중복 처리 | 로그인 상태로 register 접근→홈 리다이렉트 | `_required_login_state`에서 8.3을 "none"으로 |
-| 6.3 IP 차단 | IP 입력 액션 미구현(navigate만) | config_form의 IP 차단 textarea 입력+저장 |
-| 약한 PASS 24건 | 키워드 fallback 의존 | leaf별 URL/요소 assertion 추가 |
+| 1 | **E — 공식 PDF 시험 성적서** | tc_final.xlsx → 발주처 제출용 PDF 템플릿 |
+| 2 | Stage 5 동시성/파일첨부 시나리오 | 진짜 결함 검출 가능 영역 확대 (구조적 난이도 상) |
+| 3 | 약한 PASS 24건 정밀도 | 키워드 fallback → leaf별 URL/요소 assertion |
+| 4 | F — LLM 호출 병렬화 | 유료 플랜 한정, Stage 2 속도 |
 
 **환경 재실행 (gnuboard5 설치+픽스처는 1회만):**
 ```powershell
@@ -371,8 +404,6 @@ docker compose -f data\oss\gnuboard5\docker-compose.yml up -d
 # 최초 설치 시: python scripts\install_gnuboard5.py --admin-pw "Gnuboard5!"
 python scripts\run_stage47.py --url http://localhost:8080 --auth-id admin --auth-pw "Gnuboard5!"
 ```
-
-### 그 다음: E — 공식 PDF 시험 성적서 / F — LLM 병렬화
 
 ---
 
