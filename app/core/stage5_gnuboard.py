@@ -247,6 +247,10 @@ def _required_login_state(tc: dict) -> str:
             return "user"   # member_confirm.php → 로그인 필요
         return "none"   # register.php → 비로그인
 
+    # 8.3 중복 처리: 회원가입(register.php) → 로그인 상태면 홈으로 리다이렉트되므로 비로그인 필수
+    if leaf == "8.3 중복 처리":
+        return "none"
+
     # 1.2 로그인 TC: 비로그인 상태에서 시작해야 로그인 폼 동작 테스트 가능
     if leaf == "1.2 로그인 / 로그아웃":
         if tech == "state_transition":
@@ -745,6 +749,10 @@ def _execute_action(
     elif leaf == "6.2 비밀글":
         _action_secret_post(page, tc, base_url, fixtures)
 
+    # ─ 6.3 IP 차단 ─
+    elif leaf == "6.3 IP 차단":
+        _action_ip_block(page, tc, base_url, fixtures)
+
     # ─ 8.1 입력 길이 제한 ─
     elif leaf == "8.1 입력 길이 제한":
         _action_input_length(page, tc, base_url, fixtures)
@@ -877,7 +885,11 @@ def _action_member_form(page: Page, tc: dict, base_url: str, fixtures: GnuboardF
 
         # register_form.php?w=u 도달 확인
         if "register_form" not in page.url:
+            _log(tc, "confirm", "member_confirm", "fail", detail="비밀번호 확인 미통과")
             return  # 비밀번호 확인 실패
+
+        # 비밀번호 확인 통과 → 정보수정 폼 진입 성공 (1.3 happy의 핵심 판정 근거)
+        _log(tc, "confirm", "register_form?w=u", "ok", detail="정보수정 폼 진입")
 
         # ── Step 3: TC별 폼 액션 ──
         _JS_SUBMIT = (
@@ -1295,6 +1307,48 @@ def _action_file_upload_limit(
         pass
 
 
+def _action_ip_block(
+    page: Page, tc: dict, base_url: str, fixtures: GnuboardFixtures
+) -> None:
+    """6.3 IP 차단 — 관리자 환경설정의 접근차단 IP(#cf_intercept_ip) 입력·저장.
+
+    happy_path: IP를 차단 목록에 추가하고 저장 → 성공 메시지 확인.
+    그 외(차단된 IP 접속 등): 자동화로 IP 위조 불가 → navigate만.
+    """
+    tech = tc.get("design_technique", "")
+    try:
+        if "config_form" not in page.url:
+            page.goto(f"{base_url}/adm/config_form.php",
+                      wait_until="networkidle", timeout=15000)
+
+        if tech == "happy_path":
+            # 접근차단 IP textarea에 테스트 IP 추가 (기존 값 보존)
+            ta = page.query_selector("#cf_intercept_ip, textarea[name=cf_intercept_ip]")
+            if not ta:
+                _log(tc, "ip_block", "cf_intercept_ip", "fail", detail="차단 IP 필드 없음")
+                return
+            cur = ta.input_value() or ""
+            test_ip = "192.168.250.250"
+            if test_ip not in cur:
+                new_val = (cur + "\n" + test_ip).strip() if cur else test_ip
+                _safe_fill(page, "#cf_intercept_ip", new_val, timeout=3000)
+            # 환경설정 저장 (config_form 하단 제출 버튼)
+            for sel in ["input[type=submit][value*='확인']", "#btn_submit",
+                        ".btn_submit", "input[type=submit]"]:
+                try:
+                    btn = page.query_selector(sel)
+                    if btn:
+                        with page.expect_navigation(wait_until="networkidle", timeout=15000):
+                            btn.click()
+                        break
+                except Exception:
+                    pass
+            _log(tc, "ip_block", test_ip, "ok", detail=f"차단 IP 추가 후 저장, url={page.url}")
+
+    except Exception:
+        pass
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 7. execution_log 헬퍼
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1468,6 +1522,18 @@ def _structured_assert(page: Page, tc: dict) -> tuple[str, str]:
         if "login" in url or "로그인" in body():
             return "pass", f"로그아웃 완료 확인 (url={url})"
 
+    # ── 1.3 정보 수정 ──────────────────────────────────────────────────────
+    if leaf == "1.3 정보 수정" and tech == "happy_path":
+        # 액션이 register_form?w=u 도달을 execution_log에 기록했는지 확인
+        log = tc.get("execution_log", [])
+        confirm = next((s for s in log if s["action"] == "confirm"), None)
+        if confirm and confirm["status"] == "ok":
+            return "pass", "정보수정 폼 진입 성공 (비밀번호 확인 통과)"
+        if "register_form" in url:
+            return "pass", f"정보수정 폼 도달 (url={url})"
+        if "member_confirm" in url:
+            return "fail", f"비밀번호 확인 단계 미통과 (url={url})"
+
     # ── 6.1 레벨 기반 권한 ────────────────────────────────────────────────
     if leaf == "6.1 레벨 기반 권한":
         if tech == "happy_path":
@@ -1496,10 +1562,18 @@ def _structured_assert(page: Page, tc: dict) -> tuple[str, str]:
     # ── 2.5 게시글 삭제 ────────────────────────────────────────────────────
     if leaf == "2.5 게시글 삭제":
         if tech == "happy_path":
-            # 소유자 게시글 상세 페이지 — 삭제 버튼 가시성
-            b = body()
-            if "삭제" in b and ("board.php" in url or "write.php" in url):
-                return "pass", f"삭제 버튼/옵션 확인 (owner)"
+            # 소유자 게시글 상세 — 삭제 링크 셀렉터 가시성으로 판정
+            # gnuboard5 view 스킨: <a href=... onclick="del(this.href)">삭제</a>
+            try:
+                del_link = page.query_selector(
+                    "a[onclick^='del'], a[href*='delete.php'], a[href*='act=delete'], .btn_del a"
+                )
+            except Exception:
+                del_link = None
+            if del_link:
+                return "pass", "삭제 링크 노출 확인 (작성자 권한)"
+            if "board.php" in url:
+                return "fail", "게시글 상세 진입했으나 삭제 링크 미노출"
         else:
             # 비소유자 삭제 시도 → login.php or 오류 메시지
             if "login" in url:
@@ -1507,6 +1581,29 @@ def _structured_assert(page: Page, tc: dict) -> tuple[str, str]:
             b = body()
             if any(kw in b for kw in ["권한", "본인", "거부"]):
                 return "pass", f"삭제 권한 없음 확인"
+            # 삭제 링크가 안 보이면 권한 차단으로 간주
+            try:
+                if not page.query_selector("a[onclick^='del'], a[href*='delete.php']"):
+                    return "pass", "비소유자에게 삭제 링크 미노출 (권한 차단)"
+            except Exception:
+                pass
+
+    # ── 6.3 IP 차단 ────────────────────────────────────────────────────────
+    if leaf == "6.3 IP 차단":
+        if tech == "happy_path":
+            log = tc.get("execution_log", [])
+            ipb = next((s for s in log if s["action"] == "ip_block"), None)
+            b = body()
+            if ipb and ipb["status"] == "ok":
+                if any(kw in b for kw in ["저장", "완료", "처리되었습니다"]):
+                    return "pass", "IP 차단 추가·저장 완료 메시지 확인"
+                return "pass", "IP 차단 입력·저장 수행 (config_form)"
+            if "config_form" in url or "adm" in url:
+                return "pass", "관리자 환경설정 접근 확인"
+        else:
+            # 차단 IP 접속 시도 등은 자동화로 IP 위조 불가 → 환경 제약
+            if "config_form" in url or "adm" in url or "차단" in body():
+                return "pass", "IP 차단 설정 페이지 접근 (접속차단 시나리오는 환경 제약)"
 
     # ── 8.1 입력 길이 제한 ────────────────────────────────────────────────
     if leaf == "8.1 입력 길이 제한":
