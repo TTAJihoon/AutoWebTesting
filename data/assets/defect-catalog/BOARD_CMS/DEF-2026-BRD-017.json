@@ -1,0 +1,65 @@
+{
+  "defectId": "DEF-2026-BRD-017",
+  "projectId": "RUN-2c9b0cc4",
+  "discoveredAt": "2026-05-31T14:18:12.084417+00:00",
+  "product": {
+    "productTypeId": "BOARD_CMS",
+    "techStack": [],
+    "scale": "MEDIUM"
+  },
+  "feature": {
+    "featureType": "AUTH",
+    "screenLocation": "관리자로 로그인된 상태, [환경설정] > [IP 차단] 메뉴 접속",
+    "triggeringAction": "관리자가 접근 금지 IP 목록에 특정 IP를 정상적으로 추가"
+  },
+  "title": "관리자가 접근 금지 IP 목록에 특정 IP를 정상적으로 추가",
+  "description": "관리자가 접근 금지 IP 목록에 특정 IP를 정상적으로 추가",
+  "observedBehavior": "[[OK]] navigate: http://localhost:8080/adm/config_form.php (1731ms) — final_url=http://localhost:8080/adm/config_form.php\n[[OK]] action: 6.3 IP 차단 — url_after=http://localhost:8080/adm/config_form.php\n[[NG]] assert: fail — 페이지 텍스트(일부): 최고관리자 최고관리자님 로그인 중 로그아웃\n본문 바로가기\n그누보드5\n메뉴\n쇼핑몰 바로가기\n커뮤니티 바로가기\n부가서비",
+  "expectedBehavior": "IP 입력란에 '192.168.0.10' 입력 후 저장 시 목록에 추가되고 '정상적으로 저장되었습니다' 메시지 표시",
+  "iso25023Mapping": {
+    "characteristic": "보안성",
+    "subcharacteristic": "진정성"
+  },
+  "severity": "BLOCKER",
+  "defectCategory": "AUTH_BYPASS",
+  "detection": {
+    "method": "AUTO_TC",
+    "detectingTcId": "TC-021-001",
+    "timeToDetectMin": 1
+  },
+  "rootCause": {
+    "category": "BACKEND",
+    "whatWasMissed": ""
+  },
+  "learning": {
+    "patternProposal": {
+      "name": "BLOCKLIST_VALIDATION",
+      "description": "차단/허용 목록 설정 시 데이터 입력 및 저장 후 시스템 반영 여부를 검증하는 패턴",
+      "appliesTo": [
+        "UPDATE",
+        "AUTH"
+      ],
+      "checks": [
+        "차단 대상 데이터 입력 후 저장 요청 시 성공 응답 수신 확인",
+        "성공 메시지 또는 UI 변경이 명확히 노출되는지 확인",
+        "설정 변경 후 실제 접근 제어 기능이 의도대로 동작하는지 확인",
+        "입력값이 목록에 정상적으로 누적/저장되었는지 확인"
+      ],
+      "confidence": 0.9,
+      "generatedBy": "AI",
+      "status": "candidate"
+    }
+  },
+  "tags": [],
+  "status": "OPEN",
+  "resolution": "",
+  "_meta": {
+    "createdBy": "awt_system",
+    "createdAt": "2026-05-31T14:18:12.084417+00:00",
+    "patternGeneratedBy": "AI",
+    "patternApprovedBy": null,
+    "patternApprovedAt": null,
+    "lastModifiedBy": "awt_system",
+    "lastModifiedAt": "2026-05-31T14:18:28.080591+00:00"
+  }
+}

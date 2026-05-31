@@ -1,0 +1,65 @@
+{
+  "defectId": "DEF-2026-BRD-007",
+  "projectId": "RUN-2c9b0cc4",
+  "discoveredAt": "2026-05-31T14:15:20.028934+00:00",
+  "product": {
+    "productTypeId": "BOARD_CMS",
+    "techStack": [],
+    "scale": "MEDIUM"
+  },
+  "feature": {
+    "featureType": "AUTH",
+    "screenLocation": "로그인 상태에서 '정보 수정' 버튼 클릭 후, 현재 비밀번호 필드에 정확한 비밀번호 입력",
+    "triggeringAction": "올바른 비밀번호 입력 후 개인정보 수정 페이지로 진입 성공"
+  },
+  "title": "올바른 비밀번호 입력 후 개인정보 수정 페이지로 진입 성공",
+  "description": "올바른 비밀번호 입력 후 개인정보 수정 페이지로 진입 성공",
+  "observedBehavior": "[[OK]] navigate: http://localhost:8080/bbs/member_confirm.php (931ms) — final_url=http://localhost:8080/bbs/login.php\n[[OK]] action: 1.3 정보 수정 — url_after=http://localhost:8080/bbs/login.php\n[[NG]] assert: fail — 페이지 텍스트(일부): 로그인\n회원\n로그인\n회원가입\n회원로그인\n회원아이디\n필수\n \n비밀번호\n필수\n 로그인\n자동로그인\n아이디/비밀번호 찾기",
+  "expectedBehavior": "개인정보 수정 폼으로 이동하여 이메일, 닉네임 등 항목 수정 가능 상태가 됨",
+  "iso25023Mapping": {
+    "characteristic": "보안성",
+    "subcharacteristic": "진정성"
+  },
+  "severity": "BLOCKER",
+  "defectCategory": "AUTH_BYPASS",
+  "detection": {
+    "method": "AUTO_TC",
+    "detectingTcId": "TC-003-001",
+    "timeToDetectMin": 1
+  },
+  "rootCause": {
+    "category": "BACKEND",
+    "whatWasMissed": ""
+  },
+  "learning": {
+    "patternProposal": {
+      "name": "AUTH_REAUTH_ENFORCEMENT",
+      "description": "중요 개인정보 변경을 위한 재인증 프로세스의 세션 지속성 및 리다이렉션 검증",
+      "appliesTo": [
+        "AUTH",
+        "UPDATE"
+      ],
+      "checks": [
+        "재인증 성공 후 의도한 페이지로 리다이렉션되는지 확인",
+        "재인증 직후 세션 만료 여부 확인",
+        "성공 응답 후 권한이 필요한 리소스에 접근 가능한지 확인",
+        "로그인 페이지로 무조건 회귀하는 로직이 없는지 확인"
+      ],
+      "confidence": 0.95,
+      "generatedBy": "AI",
+      "status": "candidate"
+    }
+  },
+  "tags": [],
+  "status": "OPEN",
+  "resolution": "",
+  "_meta": {
+    "createdBy": "awt_system",
+    "createdAt": "2026-05-31T14:15:20.028934+00:00",
+    "patternGeneratedBy": "AI",
+    "patternApprovedBy": null,
+    "patternApprovedAt": null,
+    "lastModifiedBy": "awt_system",
+    "lastModifiedAt": "2026-05-31T14:15:48.647320+00:00"
+  }
+}

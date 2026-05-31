@@ -1,0 +1,64 @@
+{
+  "defectId": "DEF-2026-BRD-019",
+  "projectId": "RUN-2c9b0cc4",
+  "discoveredAt": "2026-05-31T14:18:44.115726+00:00",
+  "product": {
+    "productTypeId": "BOARD_CMS",
+    "techStack": [],
+    "scale": "MEDIUM"
+  },
+  "feature": {
+    "featureType": "AUTH",
+    "screenLocation": "이미 'testuser'라는 아이디가 회원 DB에 존재하는 상태에서 회원가입 페이지에 접속함",
+    "triggeringAction": "이미 가입된 아이디로 회원가입 시도 시 오류 발생 검증"
+  },
+  "title": "이미 가입된 아이디로 회원가입 시도 시 오류 발생 검증",
+  "description": "이미 가입된 아이디로 회원가입 시도 시 오류 발생 검증",
+  "observedBehavior": "[[OK]] navigate: http://localhost:8080/bbs/register.php (1538ms) — final_url=http://localhost:8080/bbs/register.php\n[[OK]] action: 8.3 중복 처리 — url_after=http://localhost:8080/bbs/register.php\n[[NG]] assert: fail — 페이지 텍스트(일부): 회원가입약관\n본문 바로가기\n커뮤니티\n쇼핑몰\nFAQ\nQ&A\n새글\n접속자1\n사이트 내 전체검색\n검색어 필수\n검색\n인기검색어\n테스트\n회원",
+  "expectedBehavior": "아이디 입력란에 '이미 사용 중인 아이디입니다'라는 메시지가 출력되거나, 가입 버튼 클릭 시 '이미 존재하는 아이디입니다'라는 alert 메시지가 표시됨",
+  "iso25023Mapping": {
+    "characteristic": "보안성",
+    "subcharacteristic": "진정성"
+  },
+  "severity": "BLOCKER",
+  "defectCategory": "AUTH_BYPASS",
+  "detection": {
+    "method": "AUTO_TC",
+    "detectingTcId": "TC-026-001",
+    "timeToDetectMin": 1
+  },
+  "rootCause": {
+    "category": "BACKEND",
+    "whatWasMissed": ""
+  },
+  "learning": {
+    "patternProposal": {
+      "name": "DUPLICATE_IDENTIFIER_VALIDATION",
+      "description": "중복 확인이 필요한 필드(아이디, 이메일 등)에 대해 기등록된 값 입력 시 사용자 알림 검증",
+      "appliesTo": [
+        "AUTH",
+        "CREATE"
+      ],
+      "checks": [
+        "기존에 등록된 고유 식별자 입력 시 즉각적인 가입 불가 알림 발생 여부",
+        "중복 확인 버튼 또는 서버 응답을 통해 명확한 오류 메시지 제공 여부",
+        "중복된 값이 입력된 상태에서 가입 시도 시 서버측 거절 응답 및 오류 상태 코드 반환 여부"
+      ],
+      "confidence": 1.0,
+      "generatedBy": "AI",
+      "status": "candidate"
+    }
+  },
+  "tags": [],
+  "status": "OPEN",
+  "resolution": "",
+  "_meta": {
+    "createdBy": "awt_system",
+    "createdAt": "2026-05-31T14:18:44.115726+00:00",
+    "patternGeneratedBy": "AI",
+    "patternApprovedBy": null,
+    "patternApprovedAt": null,
+    "lastModifiedBy": "awt_system",
+    "lastModifiedAt": "2026-05-31T14:19:00.904551+00:00"
+  }
+}

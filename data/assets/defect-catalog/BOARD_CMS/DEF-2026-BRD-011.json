@@ -1,0 +1,66 @@
+{
+  "defectId": "DEF-2026-BRD-011",
+  "projectId": "RUN-2c9b0cc4",
+  "discoveredAt": "2026-05-31T14:16:33.236609+00:00",
+  "product": {
+    "productTypeId": "BOARD_CMS",
+    "techStack": [],
+    "scale": "MEDIUM"
+  },
+  "feature": {
+    "featureType": "AUTH",
+    "screenLocation": "로그인 상태에서 본인이 작성한 게시글 상세 페이지 진입",
+    "triggeringAction": "작성자 본인에 의한 게시글 삭제 기능 검증"
+  },
+  "title": "작성자 본인에 의한 게시글 삭제 기능 검증",
+  "description": "작성자 본인에 의한 게시글 삭제 기능 검증",
+  "observedBehavior": "[[OK]] navigate: http://localhost:8080/bbs/board.php?bo_table=free&wr_id=1 (1130ms) — final_url=http://localhost:8080/bbs/board.php?bo_table=free\n[[OK]] action: 2.5 게시글 삭제 — url_after=http://localhost:8080/bbs/board.php?bo_table=free\n[[NG]] assert: fail — 페이지 텍스트(일부): 자유게시판 페이지\n본문 바로가기\n커뮤니티\n쇼핑몰\nFAQ\n",
+  "expectedBehavior": "삭제 확인 다이얼로그 표시 후 삭제 완료 및 목록 페이지로 이동",
+  "iso25023Mapping": {
+    "characteristic": "보안성",
+    "subcharacteristic": "진정성"
+  },
+  "severity": "BLOCKER",
+  "defectCategory": "AUTH_BYPASS",
+  "detection": {
+    "method": "AUTO_TC",
+    "detectingTcId": "TC-009-001",
+    "timeToDetectMin": 1
+  },
+  "rootCause": {
+    "category": "BACKEND",
+    "whatWasMissed": ""
+  },
+  "learning": {
+    "patternProposal": {
+      "name": "RESOURCE_OWNER_AUTH_CHECK",
+      "description": "리소스 삭제 시 요청자가 리소스의 소유자인지 확인하는 권한 검증",
+      "appliesTo": [
+        "DELETE",
+        "UPDATE",
+        "PERMISSION"
+      ],
+      "checks": [
+        "본인이 작성한 데이터에 대해서만 삭제/수정 버튼이 노출되는지 확인",
+        "비인증 사용자 또는 타인이 직접 요청(URL/API) 시 403 권한 오류가 발생하는지 확인",
+        "삭제 후 목록 페이지로 정확히 리다이렉트되는지 확인",
+        "삭제 완료 시 삭제된 데이터가 DB에서 제거되었는지 확인"
+      ],
+      "confidence": 0.95,
+      "generatedBy": "AI",
+      "status": "candidate"
+    }
+  },
+  "tags": [],
+  "status": "OPEN",
+  "resolution": "",
+  "_meta": {
+    "createdBy": "awt_system",
+    "createdAt": "2026-05-31T14:16:33.236609+00:00",
+    "patternGeneratedBy": "AI",
+    "patternApprovedBy": null,
+    "patternApprovedAt": null,
+    "lastModifiedBy": "awt_system",
+    "lastModifiedAt": "2026-05-31T14:16:54.637909+00:00"
+  }
+}
