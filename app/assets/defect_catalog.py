@@ -11,6 +11,31 @@ if TYPE_CHECKING:
 _ASSETS_DIR = Path(__file__).parent.parent.parent / "data" / "assets"
 _CATALOG_DIR = _ASSETS_DIR / "defect-catalog"
 
+_PRODUCT_TYPE_ABBR: dict[str, str] = {
+    "BOARD_CMS":     "BRD",
+    "USER_AUTH":     "USR",
+    "SHOPPING":      "SHP",
+    "SEARCH":        "SRC",
+    "DASHBOARD":     "DSH",
+    "FORM_WORKFLOW": "FRM",
+    "OTHER":         "OTH",
+}
+
+
+def next_defect_id(product_type_id: str) -> str:
+    """다음 결함 ID 생성: DEF-YYYY-TYPE-NNN."""
+    abbr = _PRODUCT_TYPE_ABBR.get(product_type_id, "OTH")
+    year = datetime.now(timezone.utc).year
+    target_dir = _CATALOG_DIR / product_type_id
+    target_dir.mkdir(parents=True, exist_ok=True)
+    max_num = 0
+    for f in target_dir.glob(f"DEF-{year}-{abbr}-*.json"):
+        try:
+            max_num = max(max_num, int(f.stem.split("-")[-1]))
+        except (ValueError, IndexError):
+            pass
+    return f"DEF-{year}-{abbr}-{max_num + 1:03d}"
+
 
 # ── 파일 CRUD ────────────────────────────────────────────────────────────────
 

@@ -13,6 +13,7 @@ from app.core import (
     stage3_verify,
     stage5_execute,
     stage6_enhance,
+    stage6b_defect_feedback,
     stage7_output,
 )
 from app.tools.excel_builder import build_review
@@ -107,6 +108,7 @@ class Orchestrator:
         )
         self.tcs: list[dict] = []
         self.ingest_result: dict = {}
+        self.new_defects: list[dict] = []   # Stage 6B 결과 (결함 카탈로그 신규 항목)
         self._stage = 0
         # 협력적 일시정지/중단 플래그 (UI가 set, stage5가 read)
         self._paused  = False
@@ -252,6 +254,26 @@ class Orchestrator:
         )
         self._stage = 6
         return self.tcs
+
+    # ── Stage 6B ─────────────────────────────────────────────────────────
+    def run_stage6b(
+        self,
+        product_type_id: str = "BOARD_CMS",
+        actor_username: str = "awt_system",
+        db=None,
+    ) -> list[dict]:
+        """Stage 6 완료 후 real_defect TC를 결함 카탈로그에 자동 피드백."""
+        self._cb("▶ Stage 6B: 결함 카탈로그 피드백")
+        self.new_defects = stage6b_defect_feedback.feedback(
+            tcs=self.tcs,
+            llm_client=self.llm,
+            product_type_id=product_type_id,
+            run_id=self.config.run_id,
+            actor_username=actor_username,
+            db=db,
+            progress_cb=self._cb,
+        )
+        return self.new_defects
 
     # ── Stage 7 ──────────────────────────────────────────────────────────
     def run_stage7(self) -> Path:

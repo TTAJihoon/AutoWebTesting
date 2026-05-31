@@ -122,9 +122,10 @@ class _PreGateWorker(QThread):
 
 class _PostGateWorker(QThread):
     """Stage 5~7 백그라운드 실행."""
-    stage_done = Signal(int)
-    finished   = Signal(object)   # Path
-    error      = Signal(str)
+    stage_done    = Signal(int)
+    finished      = Signal(object)   # Path
+    error         = Signal(str)
+    defects_found = Signal(int)      # Stage 6B: 신규 결함 수
 
     def __init__(self, orch: Orchestrator):
         super().__init__()
@@ -136,6 +137,8 @@ class _PostGateWorker(QThread):
             self.stage_done.emit(5)
             self._orch.run_stage6()
             self.stage_done.emit(6)
+            new_defects = self._orch.run_stage6b()
+            self.defects_found.emit(len(new_defects))
             out = self._orch.run_stage7()
             self.stage_done.emit(7)
             self.finished.emit(out)
@@ -911,6 +914,7 @@ class PipelineView(QMainWindow):
         self._post_worker.stage_done.connect(self._on_post_stage_done)
         self._post_worker.finished.connect(self._on_post_gate_done)
         self._post_worker.error.connect(self._on_error)
+        self._post_worker.defects_found.connect(self._on_defects_found)
         self._post_worker.start()
 
     # ── 일시정지 / 중단 ───────────────────────────────────────────────────
@@ -949,6 +953,22 @@ class PipelineView(QMainWindow):
         if n >= 5:
             self._pause_btn.setVisible(False)
             self._stop_btn.setVisible(False)
+
+    def _on_defects_found(self, count: int) -> None:
+        """Stage 6B 완료 — 결함 카탈로그 신규 항목 알림."""
+        if count == 0:
+            return
+        self._append_log(
+            f"📋 결함 카탈로그 {count}건 추가 (data/assets/defect-catalog/)"
+            " — 패턴 승인은 검수자가 직접 확인 필요"
+        )
+        if self._tray and self._tray.isSystemTrayAvailable():
+            self._tray.showMessage(
+                "AWT — 결함 카탈로그",
+                f"신규 결함 {count}건이 카탈로그에 추가됐습니다.\n패턴 후보를 검토해주세요.",
+                QSystemTrayIcon.MessageIcon.Information,
+                4000,
+            )
 
     def _on_post_gate_done(self, out: Path) -> None:
         self._tcs = self._orch.tcs
