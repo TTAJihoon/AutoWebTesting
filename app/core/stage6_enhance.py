@@ -50,17 +50,30 @@ def enhance(
     # 1) V6 사전 마킹 처리 — LLM 호출 skip (토큰 절약, doc/03-tc-schema.md §6.1)
     needs_llm: list[dict] = []
     v6_resolved = 0
+    inferred_guarded = 0
     for tc in failed:
         v6_cat = tc.get("failure_category", "")  # V6가 stage5 직후 채웠을 수 있음
         if v6_cat in _V6_TO_D50:
-            tc["failure_category"] = _V6_TO_D50[v6_cat]
-            tc["failure_category_source"] = "v6_static"
+            mapped = _V6_TO_D50[v6_cat]
+            # [D68] INFERRED 가드: 가공된 명세(INFERRED)를 검증하는 TC가 FAIL이면
+            # 제품 결함(real_defect)이 아니라 fictional_positive로 판정해야 한다.
+            # V6 정적 분석은 source_quote를 보지 않으므로 여기서 보정 (판정 우선순위 1번).
+            if mapped == "real_defect" and \
+               str(tc.get("source_quote", "")).startswith("INFERRED"):
+                tc["failure_category"] = "fictional_positive"
+                tc["failure_category_source"] = "v6_static_inferred_guard"
+                inferred_guarded += 1
+            else:
+                tc["failure_category"] = mapped
+                tc["failure_category_source"] = "v6_static"
             v6_resolved += 1
         else:
             needs_llm.append(tc)
 
     if v6_resolved:
         _cb(f"  V6 사전 마킹: {v6_resolved}건 (LLM 호출 skip)")
+    if inferred_guarded:
+        _cb(f"  INFERRED 가드: {inferred_guarded}건 real_defect→fictional_positive 보정")
 
     # 2) 나머지 — LLM FAILURE_ANALYSIS 호출
     for i, tc in enumerate(needs_llm, 1):
