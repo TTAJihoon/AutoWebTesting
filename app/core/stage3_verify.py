@@ -101,12 +101,23 @@ def verify(
         manual_excerpt = _extract_manual_for_tcs(failed_tcs, manual_text)
         # TC_REGEN은 캐시 불사용 — 동일 입력이라도 재시도마다 새 API 호출 필요
         # (캐시 히트 시 동일 실패 결과 반복 → 재시도 무의미해짐)
-        regen_result = llm_client.call("TC_REGEN", {
-            "manual_excerpt":   manual_excerpt[:2000],
-            "failed_tcs_json":  str(failed_tcs)[:_REGEN_TC_JSON_LIMIT],
-            "v_failures":       str(structural)[:800],
-            "fix_instructions": fix_instructions[:400],
-        }, use_cache=False)
+        # ── 복원력 (D54 동일): TC_REGEN 실패가 Stage 3 전체를 죽이지 않게 함 ──
+        # 빈 응답·일일 쿼터·안전 필터 등으로 호출이 실패하면, 지금까지 생성된 TC를
+        # 보존한 채 재생성을 포기하고 우아한 degradation 경로로 넘어간다.
+        try:
+            regen_result = llm_client.call("TC_REGEN", {
+                "manual_excerpt":   manual_excerpt[:2000],
+                "failed_tcs_json":  str(failed_tcs)[:_REGEN_TC_JSON_LIMIT],
+                "v_failures":       str(structural)[:800],
+                "fix_instructions": fix_instructions[:400],
+            }, use_cache=False)
+        except Exception as e:
+            err_msg = str(e).splitlines()[0][:200]
+            _cb(
+                f"⚠ TC 재작성 실패 (시도 {attempt}/{max_retries}) — {err_msg}\n"
+                f"      지금까지 생성된 TC {len(tcs)}개를 보존하고 검증을 종료합니다"
+            )
+            break   # 재시도 루프 탈출 → 아래 degradation 경로(잔여 실패 INFERRED 마킹)
 
         # 재생성된 TC로 교체 + 필드 정규화
         regen_map = {}
@@ -234,17 +245,23 @@ def _add_v10_tcs(
         excerpt         = excerpt_for_leaf(manual_text, leaf)
 
         _cb(f"  V10 보완 TC 생성: {leaf['category_leaf']} 누락={missing}")
-        result = llm_client.call("TC_DESIGN", {
-            "category_major": leaf["category_major"],
-            "category_mid":   leaf["category_mid"],
-            "category_leaf":  leaf["category_leaf"],
-            "requirement_id": rid,
-            "tc_id_start":    tc_id_start,
-            "manual_excerpt": excerpt[:1500],
-            "domain_invariants":    invariants_text or "(없음)",
-            "similar_past_defects": defects_text or "(없음)",
-            "negative_categories":  cats_text,
-        })
+        # 복원력: V10 보완은 커버리지 향상용이므로 한 leaf 실패해도 다음 leaf로 진행
+        try:
+            result = llm_client.call("TC_DESIGN", {
+                "category_major": leaf["category_major"],
+                "category_mid":   leaf["category_mid"],
+                "category_leaf":  leaf["category_leaf"],
+                "requirement_id": rid,
+                "tc_id_start":    tc_id_start,
+                "manual_excerpt": excerpt[:1500],
+                "domain_invariants":    invariants_text or "(없음)",
+                "similar_past_defects": defects_text or "(없음)",
+                "negative_categories":  cats_text,
+            })
+        except Exception as e:
+            err_msg = str(e).splitlines()[0][:150]
+            _cb(f"  ⚠ V10 보완 실패 (leaf={leaf['category_leaf']}): {err_msg} — 건너뜀")
+            continue
 
         result_tcs = result.get("tcs", [])
 
