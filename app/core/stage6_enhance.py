@@ -66,13 +66,24 @@ def enhance(
     for i, tc in enumerate(needs_llm, 1):
         _cb(f"  분석 중 ({i}/{len(needs_llm)}): {tc['tc_id']}")
         exec_mode = tc.get("exec_mode", "D39_keyword_match")
+
+        # Phase A: execution_log가 있으면 구조화된 로그를 actual_output으로 사용
+        exec_log = tc.get("execution_log")
+        if exec_log:
+            import json as _json
+            actual_output = "[execution_log]\n" + _json.dumps(
+                exec_log[-5:], ensure_ascii=False
+            )[:600]
+        else:
+            actual_output = tc.get("actual", "")[:500]
+
         result = llm_client.call("FAILURE_ANALYSIS", {
             "tc_id": tc["tc_id"],
             "exec_mode": exec_mode,
             "scenario": tc.get("scenario", "")[:200],
             "precondition": tc.get("precondition", "")[:300],
             "expected_output": tc.get("expected", "")[:300],
-            "actual_output": tc.get("actual", "")[:500],
+            "actual_output": actual_output,
             "source_quote": tc.get("source_quote", "")[:200],
         })
 

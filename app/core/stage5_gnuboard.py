@@ -1075,7 +1075,37 @@ def _action_register_duplicate_id(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 7. 결과 검증
+# 7. execution_log 헬퍼
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _log(tc: dict, action: str, target: str, status: str,
+         ms: int = 0, detail: str = "") -> None:
+    """TC execution_log에 step 1건 추가."""
+    log: list = tc.setdefault("execution_log", [])
+    entry: dict = {"step": len(log) + 1, "action": action,
+                   "target": target, "status": status}
+    if ms:
+        entry["ms"] = ms
+    if detail:
+        entry["detail"] = detail
+    log.append(entry)
+
+
+def _format_actual(log: list) -> str:
+    """execution_log 마지막 3 step → 사람이 읽기 좋은 actual 문자열."""
+    if not log:
+        return ""
+    lines: list[str] = []
+    for e in log[-3:]:
+        icon = "[OK]" if e["status"] in ("ok", "pass") else "[NG]"
+        ms_s = f" ({e['ms']}ms)" if e.get("ms") else ""
+        det  = f" — {e['detail']}" if e.get("detail") else ""
+        lines.append(f"[{icon}] {e['action']}: {e['target']}{ms_s}{det}")
+    return "\n".join(lines)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 8. 결과 검증
 # ─────────────────────────────────────────────────────────────────────────────
 
 # 소분류별 보조 키워드 (expected 텍스트에서 추출 어려운 경우 보완)
@@ -1155,6 +1185,72 @@ def _verify_expected(page: Page, tc: dict) -> tuple[str, str]:
     return result, actual
 
 
+def _structured_assert(page: Page, tc: dict) -> tuple[str, str]:
+    """URL / 요소 / 텍스트 기반 구조화 assertion.
+
+    keyword match 보다 신뢰도 높은 조건을 먼저 시도하고,
+    해당 없으면 기존 _verify_expected() fallback.
+    """
+    leaf     = tc.get("소분류", "")
+    tech     = tc.get("design_technique", "")
+    expected = (tc.get("expected") or "").lower()
+    url      = page.url.lower()
+
+    def body() -> str:
+        try:
+            return page.inner_text("body") or ""
+        except Exception:
+            return page.content()
+
+    # ── happy_path: URL 변화 기반 (가장 신뢰도 높음) ─────────────────────
+    if tech == "happy_path":
+        if leaf == "1.2 로그인 / 로그아웃":
+            if "login.php" not in url and "로그아웃" in body():
+                return "pass", f"로그인 성공: 로그아웃 링크 확인 (url={url})"
+            return "fail", f"로그인 실패 또는 로그아웃 링크 없음 (url={url})"
+
+        if leaf == "1.1 회원가입":
+            if "register" not in url and "login" not in url:
+                return "pass", f"회원가입 완료: register 페이지 벗어남 (url={url})"
+
+        if leaf == "2.2 게시글 작성":
+            if "wr_id=" in url and "board.php" in url:
+                return "pass", f"게시글 작성 완료: wr_id 확인 (url={url})"
+            return "fail", f"게시글 작성 후 board.php 미이동 (url={url})"
+
+        if leaf == "2.4 게시글 수정":
+            if "board.php" in url and "write.php" not in url:
+                return "pass", f"게시글 수정 완료 (url={url})"
+            return "fail", f"수정 후 write.php 잔류 (url={url})"
+
+        if leaf.startswith("5.") or leaf.startswith("7."):
+            if "adm" in url or "adm" in page.url:
+                return "pass", f"관리자 페이지 접근 확인 (url={url})"
+
+        if leaf == "1.2 로그인 / 로그아웃" and "로그아웃" in expected:
+            if "login" in url or "로그인" in body():
+                return "pass", f"로그아웃 완료: 로그인 폼 확인 (url={url})"
+
+    # ── negative/boundary: 권한 거부 → login.php 리다이렉트 ──────────────
+    if tech in ("negative_basic", "negative_deep", "boundary"):
+        if any(kw in expected for kw in ["권한", "거부", "로그인이", "로그인 후", "로그인하"]):
+            if "login" in url:
+                return "pass", f"권한 없음 → 로그인 리다이렉트 확인 (url={url})"
+
+        # gnuboard5 오류는 JS alert → 페이지 잔류. 폼이 남아있으면 PASS
+        if any(kw in expected for kw in ["오류", "에러", "실패", "경고", "차단", "거절"]):
+            if _page_has_relevant_form(page, leaf, body()):
+                return "pass", f"오류 처리 후 관련 페이지 유지 (url={url})"
+
+    # ── state_transition: 로그아웃 ─────────────────────────────────────────
+    if tech == "state_transition" and "로그아웃" in expected:
+        if "login" in url or "로그인" in body():
+            return "pass", f"로그아웃 완료 확인 (url={url})"
+
+    # ── fallback: 기존 keyword match ─────────────────────────────────────
+    return _verify_expected(page, tc)
+
+
 def _page_has_relevant_form(page: Page, leaf: str, text: str) -> bool:
     """현재 페이지가 해당 소분류의 관련 폼/페이지인지 확인."""
     url = page.url.lower()
@@ -1181,7 +1277,7 @@ def _page_has_relevant_form(page: Page, leaf: str, text: str) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 8. 메인 TC 실행 함수
+# 9. 메인 TC 실행 함수
 # ─────────────────────────────────────────────────────────────────────────────
 
 def execute_tc(
@@ -1191,31 +1287,42 @@ def execute_tc(
     fixtures: GnuboardFixtures,
     cb: Callable[[str], None] | None = None,
 ) -> None:
-    """TC 1개 실행 — result / actual / exec_confidence 필드 채움."""
+    """TC 1개 실행 — result / actual / execution_log / exec_confidence 채움."""
     start = time.time()
     leaf  = tc.get("소분류", "")
+    tc["execution_log"] = []   # Phase A: 실행 이력 초기화
 
     try:
         # 1. 필요한 로그인 상태 결정 + 전환
         required = _required_login_state(tc)
+        t0 = time.time()
         _ensure_login_state(page, base_url, required, fixtures, cb)
+        _log(tc, "login_state", required, "ok", ms=int((time.time() - t0) * 1000))
 
         # 2. 타겟 URL로 이동 (TC별 분기 포함)
         url = route_url(leaf, base_url, fixtures, tc=tc)
+        t0 = time.time()
         page.goto(url, wait_until="networkidle", timeout=20000)
+        _log(tc, "navigate", url, "ok",
+             ms=int((time.time() - t0) * 1000),
+             detail=f"final_url={page.url}")
 
         # 3. 소분류별 액션 실행
         _execute_action(page, tc, base_url, fixtures)
+        _log(tc, "action", leaf, "ok", detail=f"url_after={page.url}")
 
-        # 4. 기대 결과 검증
-        result, actual = _verify_expected(page, tc)
+        # 4. 구조화 assertion (Phase A: URL/요소 기반 우선, keyword fallback)
+        result, assert_detail = _structured_assert(page, tc)
+        _log(tc, "assert", result, result, detail=assert_detail)
 
         tc["result"] = result
-        tc["actual"] = actual
+        tc["actual"] = _format_actual(tc["execution_log"])
 
     except Exception as e:
+        err_msg = str(e)[:200]
+        _log(tc, "error", err_msg, "blocked")
         tc["result"] = "blocked"
-        tc["actual"] = f"실행 오류: {str(e)[:200]}"
+        tc["actual"] = f"실행 오류: {err_msg}"
 
     elapsed = time.time() - start
     tc["exec_confidence"] = min(1.0, round(0.88 - elapsed * 0.008, 3))
