@@ -159,6 +159,14 @@ def main() -> None:
     print(f"\n  [Stage 6] 실패 원인 LLM 분석")
     orch.run_stage6()
 
+    # Stage 6B: real_defect TC → 결함 카탈로그 자동 피드백
+    print(f"\n  [Stage 6B] 결함 카탈로그 피드백")
+    new_defects = orch.run_stage6b()
+    if new_defects:
+        print(f"    신규 결함 {len(new_defects)}건 카탈로그 추가")
+        for d in new_defects:
+            print(f"      {d['defectId']}: {d['title'][:50]}")
+
     # Stage 7: Excel 최종 산출
     print(f"\n  [Stage 7] Excel 최종 산출")
     out = orch.run_stage7()

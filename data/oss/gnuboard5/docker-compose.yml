@@ -42,6 +42,7 @@ services:
       - "8080:80"
     volumes:
       - ./app:/app                           # 그누보드5 소스 마운트
+      - ./awt_fixture.php:/app/awt_fixture.php:ro   # AWT 테스트 픽스처 헬퍼 (테스트 전용)
       - ./php.ini:/opt/docker/etc/php/php.ini:ro
     environment:
       WEB_DOCUMENT_ROOT: /app
