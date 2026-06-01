@@ -67,8 +67,8 @@ def collect_urls(
                     _cb(f"⚠ 인증 단계 실패 (무시): {e}")
             _cb("인증 완료")
 
-        # BFS
-        queue: list[tuple[str, int]] = [(start_url, 0)]
+        # BFS — 시작 URL도 정규화해 끝슬래시/index 차이로 인한 중복 방지
+        queue: list[tuple[str, int]] = [(_canonical(start_url) or start_url, 0)]
         stopped_by_user = False
         while queue and len(collected) < max_pages:
             # 사용자 중단 협력 체크
@@ -124,20 +124,37 @@ def collect_urls(
     return collected
 
 
-def _canonical(url: str) -> str:
-    """URL의 fragment와 자주 변하는 query 파라미터 제거 (중복 페이지 감소).
+_INDEX_FILES = ("index.php", "index.html", "index.htm", "default.php", "default.aspx")
 
-    GnuBoard5 같은 사이트는 wr_id, page 등 게시글마다 다른 query를 가지는데
-    이걸 다른 URL로 취급하면 페이지 수가 폭증. 여기서는 fragment만 제거하고
-    query는 보존 (페이지의 정체성을 결정하는 경우가 많음).
+
+def _canonical(url: str) -> str:
+    """URL을 정규화해 '같은 페이지의 다른 표기'로 인한 중복을 제거.
+
+    정규화 규칙:
+      - fragment(#anchor) 제거 — 같은 페이지의 다른 위치
+      - 끝 슬래시 제거 — '/page' 와 '/page/' 동일 취급 (단, 루트는 '/' 유지)
+      - index 파일 제거 — '/dir/index.php' → '/dir' (루트는 '/' 유지)
+      - query string은 보존 — board.php?bo_table=free 와 ?bo_table=qa 는
+        서로 다른 페이지이므로 합치지 않음 (게시판 구분 등)
     """
     from urllib.parse import urlparse, urlunparse
     try:
         u = urlparse(url)
         if not u.scheme or not u.netloc:
             return ""
-        # fragment(#anchor) 제거 — 같은 페이지의 다른 위치
-        return urlunparse((u.scheme, u.netloc, u.path, u.params, u.query, ""))
+        path = u.path or "/"
+        # index 파일 제거 (query가 없을 때만 — index.php?action=x 는 의미 있을 수 있음)
+        if not u.query:
+            for idx in _INDEX_FILES:
+                if path.lower().endswith("/" + idx):
+                    path = path[: -len(idx)]   # '/dir/index.php' → '/dir/'
+                    break
+        # 끝 슬래시 제거 (루트 제외)
+        if len(path) > 1 and path.endswith("/"):
+            path = path.rstrip("/")
+        if not path:
+            path = "/"
+        return urlunparse((u.scheme, u.netloc, path, u.params, u.query, ""))
     except Exception:
         return url
 
