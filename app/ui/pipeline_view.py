@@ -424,6 +424,20 @@ class PipelineView(QMainWindow):
         tc_hdr_row.addWidget(self._latest_btn)
 
         tc_hdr_row.addStretch()
+
+        # TC 목록 Excel 다운로드
+        self._tc_xlsx_btn = QPushButton("⬇ Excel")
+        self._tc_xlsx_btn.setFixedHeight(24)
+        self._tc_xlsx_btn.setStyleSheet(
+            "QPushButton { background:#0f766e; color:#ffffff; border:none;"
+            " border-radius:4px; padding:0 10px; font-size:11px; font-weight:600;"
+            " min-height:0px; }"
+            "QPushButton:hover { background:#0d9488; }"
+        )
+        self._tc_xlsx_btn.setToolTip("현재 TC 목록을 Excel(.xlsx)로 저장")
+        self._tc_xlsx_btn.clicked.connect(self._export_tcs_excel)
+        tc_hdr_row.addWidget(self._tc_xlsx_btn)
+
         dbl_hint = QLabel("더블클릭 → 상세")
         dbl_hint.setStyleSheet(
             "QLabel { font-size: 10px; color: #94a3b8;"
@@ -449,10 +463,13 @@ class PipelineView(QMainWindow):
             ["TC ID", "시나리오", "입력값", "예상값", "기법", "상태", "결과"]
         )
         hdr = self._tc_table.horizontalHeader()
-        hdr.setSectionResizeMode(1, QHeaderView.Stretch)
-        hdr.setSectionResizeMode(2, QHeaderView.Stretch)
-        hdr.setSectionResizeMode(3, QHeaderView.Stretch)
-        hdr.setDefaultSectionSize(90)
+        # 모든 열을 사용자가 드래그로 자유롭게 조절 (Interactive) + 합리적 초기 너비
+        hdr.setSectionResizeMode(QHeaderView.Interactive)
+        hdr.setStretchLastSection(False)
+        for col, width in enumerate([100, 300, 150, 200, 90, 70, 70]):
+            self._tc_table.setColumnWidth(col, width)
+        # 행 높이 일정하게 (긴 텍스트는 잘림, 더블클릭으로 상세 확인)
+        self._tc_table.setWordWrap(False)
         self._tc_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self._tc_table.setStyleSheet(
             "QTableWidget { border: none; background: #ffffff; }"
@@ -1262,7 +1279,8 @@ class PipelineView(QMainWindow):
             return
         from app.ui.failure_detail import FailureDetailDialog
         dlg = FailureDetailDialog(
-            tc=self._tcs[row],
+            tcs=self._tcs,        # 전체 목록 전달 → 전/후 이동 가능
+            index=row,
             run_dir=self._orch.run_dir,
             parent=self,
         )
@@ -1272,6 +1290,38 @@ class PipelineView(QMainWindow):
         self._open_detail_dialogs.append(dlg)
         dlg.show()
         dlg.raise_()
+
+    # ── TC 목록 Excel 다운로드 ────────────────────────────────────────────────
+    def _export_tcs_excel(self) -> None:
+        """현재 표시 중인 TC 목록을 Excel(.xlsx)로 저장."""
+        if not self._tcs:
+            QMessageBox.information(self, "알림", "저장할 TC가 없습니다.")
+            return
+        save_path, _ = QFileDialog.getSaveFileName(
+            self, "TC 목록 저장",
+            f"tc_list_{self._config.run_id}.xlsx",
+            "Excel 파일 (*.xlsx);;모든 파일 (*.*)",
+        )
+        if not save_path:
+            return
+        try:
+            from app.tools.excel_builder import build
+            # meta.json 있으면 제한사항·커버리지 시트도 포함
+            import json
+            meta = None
+            mp = self._orch.run_dir / "meta.json"
+            if mp.exists():
+                try:
+                    meta = json.loads(mp.read_text(encoding="utf-8"))
+                except Exception:
+                    meta = None
+            build(self._tcs, save_path, meta=meta)
+            QMessageBox.information(
+                self, "저장 완료",
+                f"TC {len(self._tcs)}개를 저장했습니다:\n{save_path}"
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "저장 실패", str(e))
 
     # ── 로그 검색 ───────────────────────────────────────────────────────────
     def _active_log(self) -> QPlainTextEdit:

@@ -39,18 +39,27 @@ _FAILURE_CAT_KO = {
 class FailureDetailDialog(QDialog):
     """실패한 TC의 모든 컨텍스트를 한 화면에 모아 표시 (pass/blocked도 동일 UI)."""
 
-    def __init__(self, tc: dict, run_dir: Path, parent=None):
+    def __init__(self, tcs, index: int = 0, run_dir: Path = None, parent=None):
+        """
+        Args:
+            tcs:   TC 목록 (전/후 이동용). 단일 dict도 허용(자동 래핑).
+            index: 처음 표시할 TC 인덱스.
+            run_dir: 스크린샷 탐색 기준 run 디렉터리.
+        """
         super().__init__(parent)
-        tc_id = tc.get("tc_id", "?")
-        self.setWindowTitle(f"TC 상세 — {tc_id}")
-        self.resize(1100, 720)
-        self.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
-        # 비모달 → 여러 TC를 동시 비교 가능
-        self.setModal(False)
-
-        self._tc      = tc
+        # 단일 dict 하위호환
+        if isinstance(tcs, dict):
+            tcs = [tcs]
+        self._tcs     = tcs or []
+        self._index   = max(0, min(index, len(self._tcs) - 1)) if self._tcs else 0
         self._run_dir = Path(run_dir) if run_dir else None
+        self._tc      = self._tcs[self._index] if self._tcs else {}
+
+        self.resize(1100, 740)
+        self.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
+        self.setModal(False)   # 비모달 → 여러 창 동시 가능
         self._build_ui()
+        self._rebuild()
 
     # ── UI ───────────────────────────────────────────────────────────────
     def _build_ui(self) -> None:
@@ -58,17 +67,38 @@ class FailureDetailDialog(QDialog):
         root.setContentsMargins(16, 14, 16, 14)
         root.setSpacing(10)
 
-        root.addWidget(self._build_header())
+        # 콘텐츠 영역 — 전/후 이동 시 이 안만 교체
+        self._content = QWidget()
+        self._content_lay = QVBoxLayout(self._content)
+        self._content_lay.setContentsMargins(0, 0, 0, 0)
+        self._content_lay.setSpacing(10)
+        root.addWidget(self._content, 1)
 
-        split = QSplitter(Qt.Horizontal)
-        split.setHandleWidth(6)
-        split.addWidget(self._build_left_panel())
-        split.addWidget(self._build_right_panel())
-        split.setSizes([440, 620])
-        root.addWidget(split, 1)
-
-        # 하단: 닫기
+        # 하단: ◀ 이전 / N/M / 다음 ▶ / 닫기
         bottom = QHBoxLayout()
+        self._prev_btn = QPushButton("◀  이전 TC")
+        self._prev_btn.setFixedHeight(34)
+        self._prev_btn.clicked.connect(self._go_prev)
+        self._next_btn = QPushButton("다음 TC  ▶")
+        self._next_btn.setFixedHeight(34)
+        self._next_btn.clicked.connect(self._go_next)
+        _nav_css = (
+            "QPushButton { background:#ffffff; color:#1e293b;"
+            " border:1px solid #cbd5e1; border-radius:6px;"
+            " padding: 0 16px; font-size:13px; font-weight:600; }"
+            "QPushButton:hover:enabled { background:#eff6ff; border-color:#93c5fd; }"
+            "QPushButton:disabled { color:#cbd5e1; }"
+        )
+        self._prev_btn.setStyleSheet(_nav_css)
+        self._next_btn.setStyleSheet(_nav_css)
+        self._pos_lbl = QLabel("")
+        self._pos_lbl.setStyleSheet(
+            "QLabel { color:#475569; font-size:12px; font-weight:600;"
+            " padding: 0 10px; }"
+        )
+        bottom.addWidget(self._prev_btn)
+        bottom.addWidget(self._pos_lbl)
+        bottom.addWidget(self._next_btn)
         bottom.addStretch()
         close_btn = QPushButton("닫기")
         close_btn.setFixedHeight(34)
@@ -81,6 +111,50 @@ class FailureDetailDialog(QDialog):
         close_btn.clicked.connect(self.close)
         bottom.addWidget(close_btn)
         root.addLayout(bottom)
+
+    def _rebuild(self) -> None:
+        """현재 인덱스의 TC로 콘텐츠 영역을 다시 채운다."""
+        self._tc = self._tcs[self._index] if self._tcs else {}
+        # 기존 콘텐츠 위젯 제거
+        while self._content_lay.count():
+            item = self._content_lay.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        # 헤더 + 좌우 패널
+        self._content_lay.addWidget(self._build_header())
+        split = QSplitter(Qt.Horizontal)
+        split.setHandleWidth(6)
+        split.addWidget(self._build_left_panel())
+        split.addWidget(self._build_right_panel())
+        split.setSizes([440, 620])
+        self._content_lay.addWidget(split, 1)
+        # 타이틀·네비 상태
+        tc_id = self._tc.get("tc_id", "?")
+        self.setWindowTitle(f"TC 상세 — {tc_id}")
+        n = len(self._tcs)
+        self._pos_lbl.setText(f"{self._index + 1} / {n}")
+        self._prev_btn.setEnabled(self._index > 0)
+        self._next_btn.setEnabled(self._index < n - 1)
+
+    def _go_prev(self) -> None:
+        if self._index > 0:
+            self._index -= 1
+            self._rebuild()
+
+    def _go_next(self) -> None:
+        if self._index < len(self._tcs) - 1:
+            self._index += 1
+            self._rebuild()
+
+    def keyPressEvent(self, event) -> None:
+        # ←/→ 키로도 이동
+        from PySide6.QtCore import Qt as _Qt
+        if event.key() == _Qt.Key_Left:
+            self._go_prev(); return
+        if event.key() == _Qt.Key_Right:
+            self._go_next(); return
+        super().keyPressEvent(event)
 
     # ── 헤더 ─────────────────────────────────────────────────────────────
     def _build_header(self) -> QWidget:
@@ -187,14 +261,40 @@ class FailureDetailDialog(QDialog):
 
         return card
 
+    def _resolve_screenshot(self, ss_name: str) -> Path | None:
+        """스크린샷 파일 경로 해석. 현재 run에 없으면 다른 run에서도 탐색.
+
+        (DOM 캐시 재사용·기능 통합 시 screenshot_file이 다른 run의 것일 수 있음)
+        """
+        if not ss_name:
+            return None
+        # 1) 현재 run
+        if self._run_dir:
+            p = self._run_dir / "dom-scan" / "screenshots" / ss_name
+            if p.exists():
+                return p
+        # 2) 모든 run의 screenshots 폴더에서 동일 파일명 탐색 (최근 우선)
+        try:
+            runs_dir = Path("data/runs")
+            if runs_dir.exists():
+                cands = sorted(
+                    runs_dir.glob(f"*/dom-scan/screenshots/{ss_name}"),
+                    key=lambda p: p.stat().st_mtime, reverse=True,
+                )
+                if cands:
+                    return cands[0]
+        except Exception:
+            pass
+        return None
+
     def _load_screenshot_widget(self) -> QWidget:
         ss_name = self._tc.get("screenshot_file", "")
-        if not ss_name or not self._run_dir:
+        if not ss_name:
             return self._no_screenshot_placeholder("스크린샷 없음")
-        ss_path = self._run_dir / "dom-scan" / "screenshots" / ss_name
-        if not ss_path.exists():
+        ss_path = self._resolve_screenshot(ss_name)
+        if ss_path is None:
             return self._no_screenshot_placeholder(
-                f"파일을 찾을 수 없음:\n{ss_name}"
+                f"파일을 찾을 수 없음:\n{ss_name}\n(어느 run에도 없음)"
             )
 
         pix = QPixmap(str(ss_path))
