@@ -227,6 +227,21 @@ def scan(
 
         browser.close()
 
+    # ── feature 스키마 정규화 ────────────────────────────────────────────────
+    # LLM이 category_mid 등을 누락하거나, 구버전 캐시 draft가 다른 스키마일 때
+    # 이후 단계(markdown 요약·Stage 1 leaf 추출)가 KeyError로 죽지 않도록 보강.
+    for f in all_features:
+        if not f.get("category_major"):
+            f["category_major"] = "기타"
+        if not f.get("category_mid"):
+            f["category_mid"] = "일반"
+        if not f.get("category_leaf"):
+            f["category_leaf"] = f.get("implicit_spec") or "미분류"
+        f.setdefault("implicit_spec", "")
+        f.setdefault("source_element", "")
+        f.setdefault("confidence", "")
+        f.setdefault("screenshot_file", "")
+
     # ── 명세 초안 저장 ────────────────────────────────────────────────────────
     draft = {
         "url":           url,
@@ -239,14 +254,14 @@ def scan(
     spec_path = out_dir / "feature-spec-draft.json"
     spec_path.write_text(json.dumps(draft, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # 마크다운도 생성
+    # 마크다운도 생성 (정규화 후이므로 .get으로도 안전)
     md_lines = [
         f"# 기능 명세 초안\n\n"
         f"> URL: {url}  |  스캔 페이지: {len(visited)}  |  기능 추출: {len(all_features)}개\n"
     ]
     for f in all_features:
         md_lines.append(
-            f"## {f['category_major']} > {f['category_mid']} > {f['category_leaf']}\n"
+            f"## {f.get('category_major','기타')} > {f.get('category_mid','일반')} > {f.get('category_leaf','미분류')}\n"
             f"- 명세: {f.get('implicit_spec','')}\n"
             f"- 근거 요소: `{f.get('source_element','')}`  신뢰도: {f.get('confidence','')}\n"
             f"- 스크린샷: {f.get('screenshot_file','')}\n"
