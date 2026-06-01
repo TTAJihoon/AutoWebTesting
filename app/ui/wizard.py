@@ -243,7 +243,15 @@ class RunWizard(QDialog):
 
     run_config_ready = Signal(object)  # RunConfig
 
-    def __init__(self, api_key: str, prefill_url: str = "", parent=None):
+    def __init__(self, api_key: str, prefill_url: str = "",
+                 prefill_config: dict | None = None, parent=None):
+        """
+        Args:
+            prefill_config: 복제 시 모든 스텝 값을 채우기 위한 설정 dict
+                (meta.json 형식: target_url / input_files / auth_sequence /
+                 model_override / inferred_threshold / max_leaves /
+                 headless_exec / slow_mo_ms). None이면 빈 마법사.
+        """
         super().__init__(parent)
         self.setWindowTitle("새 실행 — 설정 마법사")
         self.setFixedSize(720, 660)
@@ -254,6 +262,9 @@ class RunWizard(QDialog):
         # 복제 시 URL 자동 입력
         if prefill_url:
             self._url_edit.setText(prefill_url)
+        # 복제 시 전체 스텝 값 채우기
+        if prefill_config:
+            self._apply_prefill(prefill_config)
 
     # ── UI ────────────────────────────────────────────────────────────────
     def _build_ui(self) -> None:
@@ -656,6 +667,64 @@ class RunWizard(QDialog):
         )
         self.run_config_ready.emit(config)
         self.accept()
+
+    # ── 복제: 전체 스텝 값 채우기 ──────────────────────────────────────────
+    def _apply_prefill(self, cfg: dict) -> None:
+        """meta.json 형식의 dict로 Step 1~3 모든 입력을 채운다 (복제용)."""
+        # Step 1: URL + 파일
+        url = cfg.get("target_url", "")
+        if url:
+            self._url_edit.setText(url)
+        for f in (cfg.get("input_files") or []):
+            if f and not any(self._file_list.item(i).text() == f
+                             for i in range(self._file_list.count())):
+                self._file_list.addItem(f)
+
+        # Step 2: 인증 시퀀스 — 행 추가 후 콤보·셀 채우기
+        for entry in (cfg.get("auth_sequence") or []):
+            action = entry.get("action", "fill")
+            # goto는 url 또는 selector, 그 외는 selector
+            sel = entry.get("url") if action == "goto" else entry.get("selector", "")
+            sel = sel or entry.get("selector", "")
+            val = entry.get("value", "")
+            self._add_auth_row()
+            r = self._auth_table.rowCount() - 1
+            combo = self._auth_table.cellWidget(r, 0)
+            if combo is not None:
+                # userData(영문 코드)로 인덱스 찾기
+                for i in range(combo.count()):
+                    if combo.itemData(i) == action:
+                        combo.setCurrentIndex(i)
+                        break
+            self._auth_table.setItem(r, 1, QTableWidgetItem(str(sel)))
+            if val:
+                self._auth_table.setItem(r, 2, QTableWidgetItem(str(val)))
+
+        # Step 3: 모델 / 임계값 / max_leaves / 헤드풀
+        model_id = cfg.get("model_override")
+        if model_id:
+            for i in range(self._model_combo.count()):
+                if self._model_combo.itemData(i) == model_id:
+                    self._model_combo.setCurrentIndex(i)
+                    break
+        if "inferred_threshold" in cfg and cfg["inferred_threshold"] is not None:
+            try:
+                self._thresh_spin.setValue(float(cfg["inferred_threshold"]))
+            except (TypeError, ValueError):
+                pass
+        if "max_leaves" in cfg and cfg["max_leaves"] is not None:
+            try:
+                self._max_leaves_spin.setValue(int(cfg["max_leaves"]))
+            except (TypeError, ValueError):
+                pass
+        # headless_exec=False → 브라우저 표시 체크
+        show_browser = not cfg.get("headless_exec", True)
+        self._headless_cb.setChecked(show_browser)
+        if show_browser and cfg.get("slow_mo_ms"):
+            try:
+                self._slowmo_spin.setValue(int(cfg["slow_mo_ms"]))
+            except (TypeError, ValueError):
+                pass
 
     # ── 파일 목록 ─────────────────────────────────────────────────────────
     def _add_files(self) -> None:

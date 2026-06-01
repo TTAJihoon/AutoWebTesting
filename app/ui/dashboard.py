@@ -38,7 +38,7 @@ class Dashboard(QMainWindow):
 
     new_run_requested = Signal()       # → wizard 열기
     open_run_requested = Signal(str)   # run_id → pipeline_view 열기
-    clone_run_requested = Signal(str)  # url → wizard(prefill) 열기
+    clone_run_requested = Signal(str)  # run_id → wizard(전체 설정 prefill) 열기
     resume_run_requested = Signal(str, int)   # (run_id, from_stage) → 재개
     logout_requested = Signal()        # → 로그아웃
 
@@ -717,8 +717,8 @@ class Dashboard(QMainWindow):
             resume_stage = Orchestrator.suggest_resume_stage(run_dir)
 
         menu = QMenu(self)
-        clone_action = menu.addAction("복제 (URL 복사 + 새 마법사)")
-        clone_action.setEnabled(has_url)
+        clone_action = menu.addAction("복제 (모든 설정 복사 + 새 마법사)")
+        clone_action.setEnabled(bool(run_id))
 
         resume_action = None
         if resume_stage is not None:
@@ -736,10 +736,11 @@ class Dashboard(QMainWindow):
             delete_action = menu.addAction("🗑  이력 삭제")
 
         action = menu.exec(self._runs_table.viewport().mapToGlobal(pos))
-        if action == clone_action and has_url:
-            QApplication.clipboard().setText(url)
-            self.clone_run_requested.emit(url)
-            self.statusBar().showMessage(f"URL 복사됨: {url}", 3000)
+        if action == clone_action and run_id:
+            if has_url:
+                QApplication.clipboard().setText(url)
+            self.clone_run_requested.emit(run_id)
+            self.statusBar().showMessage(f"'{run_id}' 설정을 복제합니다", 3000)
         elif resume_action is not None and action == resume_action:
             self.resume_run_requested.emit(run_id, resume_stage)
         elif action is not None and action == delete_action:

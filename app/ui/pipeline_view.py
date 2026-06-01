@@ -1368,6 +1368,10 @@ class PipelineView(QMainWindow):
                 "selected_urls":  cfg.selected_urls or [],
                 # ── 입력 파일 (이름만) ──────────────────────────────────────
                 "input_files":    [str(p) for p in (cfg.input_files or [])],
+                # ── 인증 시퀀스 (복제 시 Step 2 재현용) ─────────────────────
+                # ⚠ 로컬 시험 도구 — auth 값(비밀번호 포함)이 평문 저장됨.
+                #    data/runs/ 는 gitignore 대상.
+                "auth_sequence":  cfg.auth_sequence or [],
                 # ── 박정훈 추적성 권고: Stage 2에서 누락된 leaf 정보 ──────
                 "stage2_failed_leaves":   getattr(self._orch, "stage2_failed_leaves",   []),
                 "stage2_excluded_leaves": getattr(self._orch, "stage2_excluded_leaves", []),

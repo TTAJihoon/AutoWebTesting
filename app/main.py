@@ -14,6 +14,7 @@ from app.ui.wizard import RunWizard
 from app.ui.pipeline_view import PipelineView
 from app.ui.reviewer_gate import ReviewerGate
 from app.ui.theme import APPLE_QSS
+from app.core.orchestrator import RunConfig
 
 
 def main() -> None:
@@ -68,7 +69,6 @@ def main() -> None:
           5 = Stage 5~7부터 (tc_gated.json 로드)
         """
         import json
-        from app.core.orchestrator import RunConfig
         from pathlib import Path as _P
 
         run_dir = _P("data/runs") / run_id
@@ -82,55 +82,8 @@ def main() -> None:
             QMessageBox.critical(dash, "재개 오류", f"meta.json 로드 실패: {e}")
             return
 
-        current_key = load_api_key() or api_key
-        # 기존 meta에서 환경 복원
-        cfg = RunConfig(
-            api_key=current_key,
-            target_url=meta.get("target_url", ""),
-            input_files=meta.get("input_files") or [],
-            auth_sequence=[],   # 인증은 이미 Stage 0에서 완료, 재개에선 불필요
-            run_id=run_id,      # 같은 run_id 유지 — 산출물 덮어쓰기
-            inferred_threshold=meta.get("inferred_threshold", 0.30),
-            max_leaves=meta.get("max_leaves", 50),
-            model_override=meta.get("model_override"),
-            max_pages=meta.get("max_pages", 30),
-            headless_exec=meta.get("headless_exec", True),
-            slow_mo_ms=meta.get("slow_mo_ms", 0),
-        )
-
-        pv = PipelineView(config=cfg, parent=None)
-        _pipeline_views.append(pv)
-
-        def _open_gate(tcs: list[dict]) -> None:
-            try:
-                manual_text = ""
-                try:
-                    manual_text = pv._orch.ingest_result.get("manual_text", "")
-                except Exception:
-                    pass
-                gate = ReviewerGate(
-                    tcs=tcs, reviewer_id=username, parent=pv,
-                    llm_client=pv._orch.llm,
-                    manual_text=manual_text,
-                )
-                gate.decisions_ready.connect(pv.apply_gate)
-                gate.tcs_regenerated.connect(_on_tcs_regenerated_resume)
-                gate.raise_()
-                gate.activateWindow()
-                gate.exec()
-            except Exception:
-                import traceback
-                QMessageBox.critical(pv, "Stage 4 오류", traceback.format_exc()[:1200])
-
-        def _on_tcs_regenerated_resume(new_tcs: list[dict]) -> None:
-            pv._tcs = new_tcs
-            pv._orch.tcs = new_tcs
-            pv._orch._save_intermediate("tc_verified")
-            pv._refresh_tc_table()
-            pv._append_log(f"🔄 거부 TC 재생성 — 총 {len(new_tcs)}개 (검토 후 다시 확정)")
-
-        pv.gate_review_requested.connect(_open_gate)
-        pv.show()
+        cfg = _config_from_meta(run_id, meta)
+        pv = _spawn_pipeline(cfg)
 
         # 재개 — orchestrator에 데이터 로드 + 적절한 stage 활성화
         try:
@@ -198,9 +151,21 @@ def main() -> None:
         wiz.run_config_ready.connect(_start_pipeline)
         wiz.exec()
 
-    def _start_pipeline(config) -> None:
+    def _spawn_pipeline(config) -> "PipelineView":
+        """PipelineView 생성 + Reviewer Gate/재생성 핸들러 와이어링 + 표시.
+
+        _start_pipeline / _resume_run / _reopen_run(처음부터 실행) 공용.
+        반환된 pv에 대해 호출자가 추가로 stage 상태를 세팅할 수 있다.
+        """
         pv = PipelineView(config=config, parent=None)
         _pipeline_views.append(pv)
+
+        def _on_tcs_regenerated(new_tcs: list[dict]) -> None:
+            pv._tcs = new_tcs
+            pv._orch.tcs = new_tcs
+            pv._orch._save_intermediate("tc_verified")  # 중간 저장 (이후 재개 가능)
+            pv._refresh_tc_table()
+            pv._append_log(f"🔄 거부 TC 재생성 — 총 {len(new_tcs)}개 (검토 후 다시 확정)")
 
         def _open_gate(tcs: list[dict]) -> None:
             try:
@@ -215,31 +180,41 @@ def main() -> None:
                     manual_text=manual_text,
                 )
                 gate.decisions_ready.connect(pv.apply_gate)
-                # 재생성된 TC를 pipeline_view에도 반영
                 gate.tcs_regenerated.connect(_on_tcs_regenerated)
                 gate.raise_()
                 gate.activateWindow()
                 gate.exec()
             except Exception:
                 import traceback
-                QMessageBox.critical(
-                    pv, "Stage 4 오류",
-                    traceback.format_exc()[:1200],
-                )
-
-        def _on_tcs_regenerated(new_tcs: list[dict]) -> None:
-            """ReviewerGate에서 재생성 발생 시 pipeline_view와 orchestrator도 동기화."""
-            pv._tcs = new_tcs
-            pv._orch.tcs = new_tcs
-            pv._orch._save_intermediate("tc_verified")  # 중간 저장 (이후 재개 가능)
-            pv._refresh_tc_table()
-            pv._append_log(f"🔄 거부 TC 재생성 — 총 {len(new_tcs)}개 (검토 후 다시 확정)")
+                QMessageBox.critical(pv, "Stage 4 오류", traceback.format_exc()[:1200])
 
         pv.gate_review_requested.connect(_open_gate)
         pv.show()
+        return pv
+
+    def _start_pipeline(config) -> None:
+        _spawn_pipeline(config)
+
+    def _config_from_meta(run_id: str, meta: dict) -> "RunConfig":
+        """meta.json → RunConfig 복원 (재개·재실행 공용)."""
+        current_key = load_api_key() or api_key
+        return RunConfig(
+            api_key=current_key,
+            target_url=meta.get("target_url", ""),
+            input_files=meta.get("input_files") or [],
+            auth_sequence=meta.get("auth_sequence") or [],
+            run_id=run_id,
+            inferred_threshold=meta.get("inferred_threshold", 0.30),
+            max_leaves=meta.get("max_leaves", 50),
+            model_override=meta.get("model_override"),
+            max_pages=meta.get("max_pages", 30),
+            headless_exec=meta.get("headless_exec", True),
+            slow_mo_ms=meta.get("slow_mo_ms", 0),
+        )
 
     def _reopen_run(run_id: str) -> None:
-        """이력 더블클릭 — 진행 중이면 PipelineView 포커스, 완료면 Excel 열기."""
+        """이력 더블클릭 — 진행 중이면 포커스, 완료면 Excel, 그 외엔 적절한 단계부터 이어서 진행."""
+        import json
         # ① 열려 있는 PipelineView 탐색 (최소화 상태도 포함)
         for pv in _pipeline_views:
             if (hasattr(pv, "config")
@@ -251,32 +226,50 @@ def main() -> None:
                 pv.activateWindow()
                 return
 
-        # ② 완료된 실행 — tc_final.xlsx 열기
         run_dir = Path("data/runs") / run_id
+        meta_path = run_dir / "meta.json"
+        meta: dict = {}
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            except Exception:
+                meta = {}
+        stage = (meta.get("stage") or "").lower()
+
+        # ② 완료된 실행 — tc_final.xlsx 열기
         tc_final = run_dir / "tc_final.xlsx"
-        if tc_final.exists():
+        if stage == "done" and tc_final.exists():
             import subprocess
             subprocess.Popen(["explorer", str(tc_final)])
             return
 
-        # ③ 진행 중도 아니고 완료도 아닌 경우 (중단된 실행 등)
-        tc_verified = run_dir / "tc_verified.json"
-        stage_hint = ""
-        if tc_verified.exists():
-            stage_hint = "Stage 3까지 완료된 실행입니다.\n"
-        elif (run_dir / "tc_raw.json").exists():
-            stage_hint = "Stage 2까지 완료된 실행입니다.\n"
+        # ③ 중간 완료 단계가 있으면 그 지점부터 재개
+        #    tc_gated.json → Stage 5~7,  tc_verified.json → Stage 4 (Reviewer Gate)
+        from app.core.orchestrator import Orchestrator
+        resume_stage = Orchestrator.suggest_resume_stage(run_dir)
+        if resume_stage is not None:
+            _resume_run(run_id, resume_stage)
+            return
 
-        QMessageBox.information(
-            dash, "실행 정보",
-            f"Run ID: {run_id}\n"
-            f"{stage_hint}"
-            "열려 있는 Pipeline View가 없고 최종 Excel도 없습니다.\n"
-            "새 실행을 시작하거나 우클릭 → 복제로 재실행하세요.",
+        # ④ 산출물이 없으면(설정만 됨) → 저장된 설정으로 Stage 1~3 실행 화면 오픈
+        if not meta:
+            QMessageBox.information(
+                dash, "실행 정보",
+                f"Run ID: {run_id}\n"
+                "meta.json이 없어 이어서 진행할 수 없습니다.\n"
+                "새 실행을 시작하거나 우클릭 → 복제로 재실행하세요.",
+            )
+            return
+        cfg = _config_from_meta(run_id, meta)
+        pv = _spawn_pipeline(cfg)
+        pv._append_log(
+            f"📂 이력에서 다시 열기 — 저장된 설정 복원 완료. "
+            f"'Stage 1~3 실행'을 눌러 이어서 진행하세요."
         )
 
-    def _clone_run(url: str) -> None:
-        """이력 우클릭 → 복제: URL 클립보드 복사 + wizard prefill."""
+    def _clone_run(run_id: str) -> None:
+        """이력 우클릭 → 복제: 그 실행의 모든 스텝 설정을 복사해 새 마법사 prefill."""
+        import json
         current_key = load_api_key() or api_key
         if not current_key or current_key.startswith("AIza여기에") or current_key.startswith("sk-ant-여기에") or current_key.startswith("sk-여기에"):
             QMessageBox.warning(
@@ -285,7 +278,20 @@ def main() -> None:
                 "대시보드 → 설정 탭에서 API Key를 먼저 저장해주세요."
             )
             return
-        wiz = RunWizard(api_key=current_key, prefill_url=url, parent=dash)
+        # meta.json에서 전체 설정 복원 → wizard prefill_config로 전달
+        meta: dict = {}
+        meta_path = Path("data/runs") / run_id / "meta.json"
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            except Exception:
+                meta = {}
+        wiz = RunWizard(
+            api_key=current_key,
+            prefill_url=meta.get("target_url", ""),
+            prefill_config=meta or None,
+            parent=dash,
+        )
         wiz.run_config_ready.connect(_start_pipeline)
         wiz.exec()
 
