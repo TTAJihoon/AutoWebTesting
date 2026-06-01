@@ -1,11 +1,23 @@
 """TC Excel 산출 빌더 (Stage 7, doc/03-tc-schema.md §6)."""
 from __future__ import annotations
+import re
 from pathlib import Path
 from typing import Any
 
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+
+# openpyxl이 거부하는 제어문자 (0x00-08, 0x0b, 0x0c, 0x0e-1f) 제거용
+# injection/경계 시험 TC 본문에 제어문자·널바이트가 섞여 IllegalCharacterError 발생 → 정화
+_ILLEGAL_XLSX_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _san(val: Any) -> Any:
+    """셀에 쓸 값 정화. 문자열이면 Excel 금지 제어문자를 제거, 그 외는 그대로."""
+    if isinstance(val, str):
+        return _ILLEGAL_XLSX_RE.sub("", val)
+    return val
 
 # 컬럼 정의 (doc/03-tc-schema.md §2)
 # screenshot_file: Stage 0 스크린샷과 TC 연결 (파일명만 저장, 절대경로 아님)
@@ -89,7 +101,7 @@ def _write_sheet(ws, columns: list[str], rows: list[dict], confidence_col: str |
     for ri, row in enumerate(rows, 2):
         for ci, col in enumerate(columns, 1):
             val  = row.get(col, "")
-            cell = ws.cell(row=ri, column=ci, value=val)
+            cell = ws.cell(row=ri, column=ci, value=_san(val))
             cell.alignment = Alignment(wrap_text=True, vertical="top")
             cell.border    = _BORDER
 
@@ -246,7 +258,7 @@ def _write_coverage_matrix_sheet(ws, tcs: list[dict]) -> None:
             coverage_label,
         ]
         for ci, val in enumerate(row_vals, 1):
-            cell = ws.cell(row=ri, column=ci, value=val)
+            cell = ws.cell(row=ri, column=ci, value=_san(val))
             cell.alignment = Alignment(wrap_text=True, vertical="top")
             cell.border = _BORDER
 
@@ -322,7 +334,7 @@ def _write_limitations_sheet(ws, tcs: list[dict], meta: dict) -> None:
         k.font = KEY_FONT
         k.alignment = Alignment(vertical="center", indent=1)
         k.border = BORDER
-        v = ws.cell(row=row, column=2, value=str(val) if val not in (None, "") else "—")
+        v = ws.cell(row=row, column=2, value=_san(str(val)) if val not in (None, "") else "—")
         v.alignment = Alignment(vertical="center", wrap_text=True)
         v.border = BORDER
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
@@ -370,12 +382,12 @@ def _write_limitations_sheet(ws, tcs: list[dict], meta: dict) -> None:
         for rep, members in list(url_groups.items())[:30]:
             c1 = ws.cell(row=row, column=1, value=f"  대표(+{len(members)})")
             c1.font = Font(size=9, color="1E6B3C", bold=True)
-            c2 = ws.cell(row=row, column=2, value=rep)
+            c2 = ws.cell(row=row, column=2, value=_san(rep))
             c2.font = Font(size=9, color="475569")
             c2.alignment = Alignment(wrap_text=True)
             c3 = ws.cell(row=row, column=3,
-                         value=f"동형 {len(members)}개: " + ", ".join(members[:3])
-                               + (" …" if len(members) > 3 else ""))
+                         value=_san(f"동형 {len(members)}개: " + ", ".join(members[:3])
+                               + (" …" if len(members) > 3 else "")))
             c3.font = Font(size=8, color="94A3B8")
             c3.alignment = Alignment(wrap_text=True)
             row += 1
@@ -392,7 +404,7 @@ def _write_limitations_sheet(ws, tcs: list[dict], meta: dict) -> None:
         ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
         row += 1
         for u in cache_urls:
-            c = ws.cell(row=row, column=2, value=u)
+            c = ws.cell(row=row, column=2, value=_san(u))
             c.alignment = Alignment(wrap_text=True)
             c.font = Font(size=9, color="475569")
             ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
@@ -457,7 +469,7 @@ def _write_limitations_sheet(ws, tcs: list[dict], meta: dict) -> None:
             for col_i, val in enumerate([
                 item.get("idx"), item.get("name"), item.get("reason"),
             ], 1):
-                c = ws.cell(row=row, column=col_i, value=val)
+                c = ws.cell(row=row, column=col_i, value=_san(val))
                 c.font = Font(size=9)
                 c.border = BORDER
                 c.alignment = Alignment(wrap_text=True, vertical="top")
@@ -485,7 +497,7 @@ def _write_limitations_sheet(ws, tcs: list[dict], meta: dict) -> None:
             for col_i, val in enumerate([
                 item.get("idx"), item.get("name"), item.get("confidence"),
             ], 1):
-                c = ws.cell(row=row, column=col_i, value=val)
+                c = ws.cell(row=row, column=col_i, value=_san(val))
                 c.font = Font(size=9)
                 c.border = BORDER
             row += 1
@@ -578,7 +590,7 @@ def build_features(features: list[dict], output_path: str | Path) -> Path:
     for ri, feat in enumerate(features, 2):
         for ci, col in enumerate(_FEATURE_COLS, 1):
             val  = feat.get(col, "")
-            cell = ws.cell(row=ri, column=ci, value=val)
+            cell = ws.cell(row=ri, column=ci, value=_san(val))
             cell.alignment = Alignment(wrap_text=True, vertical="top")
             cell.border    = _BORDER
 
