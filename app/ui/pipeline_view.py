@@ -836,16 +836,21 @@ class PipelineView(QMainWindow):
                 self._append_log("페이지 선택이 취소되었습니다. 실행을 시작하지 않습니다.")
                 return
             # 선택 결과를 config에 반영
-            self._config.selected_urls   = picker.selected_urls
-            self._config.cached_features = picker.selected_cache
+            self._config.selected_urls      = picker.selected_urls
+            self._config.cached_features    = picker.selected_cache
+            self._config.selected_url_groups = picker.selected_groups
 
             n_sel   = len(picker.selected_urls)
             n_cache = len(picker.selected_cache)
             n_llm   = n_sel - n_cache
-            self._append_log(
+            n_merged = sum(len(v) for v in picker.selected_groups.values())
+            msg = (
                 f"페이지 선택 완료 — 분석할 페이지 {n_sel}개 "
                 f"(♻ 캐시 재사용 {n_cache}개 + 🆕 LLM 분석 {n_llm}개)"
             )
+            if n_merged > 0:
+                msg += f"\n      🧹 동형 페이지 {n_merged}개는 대표로 묶여 제외됨 (추적성: meta.json 기록)"
+            self._append_log(msg)
 
         self._run_btn.setEnabled(False)
         # (페이지 선택 진행 로그를 보존하기 위해 self._log.clear() 호출하지 않음)
@@ -1366,6 +1371,8 @@ class PipelineView(QMainWindow):
                 "dom_cache_used": list((cfg.cached_features or {}).keys()),
                 # ── 선택된 페이지 ───────────────────────────────────────────
                 "selected_urls":  cfg.selected_urls or [],
+                # ── 중복 정리 추적성: 대표 URL → 묶인 동형 URL 목록 ──────────
+                "selected_url_groups": cfg.selected_url_groups or {},
                 # ── 입력 파일 (이름만) ──────────────────────────────────────
                 "input_files":    [str(p) for p in (cfg.input_files or [])],
                 # ── 인증 시퀀스 (복제 시 Step 2 재현용) ─────────────────────

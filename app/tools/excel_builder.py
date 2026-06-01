@@ -345,11 +345,41 @@ def _write_limitations_sheet(ws, tcs: list[dict], meta: dict) -> None:
     row += 1
 
     # ── 2. 분석 범위 ───────────────────────────────────────────────────
-    _section("2. 분석 범위 (선택된 페이지 / 캐시 재사용)")
+    _section("2. 분석 범위 (선택된 페이지 / 캐시 재사용 / 중복 정리)")
     sel_urls = meta.get("selected_urls") or []
     cache_urls = meta.get("dom_cache_used") or []
+    url_groups = meta.get("selected_url_groups") or {}
+    n_merged = sum(len(v) for v in url_groups.values())
     _kv("분석 대상 페이지 수",   f"{len(sel_urls)}개" if sel_urls else "(전체 BFS)")
     _kv("캐시 재사용 페이지 수", f"{len(cache_urls)}개")
+    _kv("중복 정리(동형 묶음)",
+        f"{len(url_groups)}개 대표가 동형 {n_merged}개 포함" if n_merged else "없음")
+
+    # 동형 묶음 상세 — 대표 1개로 동형 N개를 대표 시험했음을 명시 (커버리지 정당화)
+    if url_groups:
+        sub = ws.cell(row=row, column=1,
+                      value="  동형 페이지 묶음 (대표 1개 시험 = 동형 전체 적용):")
+        sub.font = SUB_FONT
+        sub.fill = SUB_FILL
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
+        row += 1
+        for rep, members in list(url_groups.items())[:30]:
+            c1 = ws.cell(row=row, column=1, value=f"  대표(+{len(members)})")
+            c1.font = Font(size=9, color="1E6B3C", bold=True)
+            c2 = ws.cell(row=row, column=2, value=rep)
+            c2.font = Font(size=9, color="475569")
+            c2.alignment = Alignment(wrap_text=True)
+            c3 = ws.cell(row=row, column=3,
+                         value=f"동형 {len(members)}개: " + ", ".join(members[:3])
+                               + (" …" if len(members) > 3 else ""))
+            c3.font = Font(size=8, color="94A3B8")
+            c3.alignment = Alignment(wrap_text=True)
+            row += 1
+        if len(url_groups) > 30:
+            c = ws.cell(row=row, column=1, value=f"  … 외 {len(url_groups) - 30}개 그룹")
+            c.font = Font(italic=True, color="64748B", size=9)
+            row += 1
+    row += 1
 
     if cache_urls:
         sub = ws.cell(row=row, column=1, value="  캐시 재사용 URL 목록:")

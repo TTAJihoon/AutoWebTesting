@@ -23,8 +23,14 @@ def collect_urls(
         should_stop: True를 반환하면 BFS 즉시 중단 (협력적 인터럽트).
 
     Returns:
-        [{"url": str, "title": str, "depth": int}, ...]
+        [{"url", "title", "depth", "fingerprint", "group_key",
+          "is_representative", "group_size", "group_rep_url"}, ...]
         — 발견 순서대로. start_url이 첫 항목.
+        · fingerprint:      DOM 구조 골격 해시 (L2)
+        · group_key:        (식별 URL, fingerprint) 조합 키
+        · is_representative: 그룹 대표 페이지면 True (분석 대상)
+        · group_size:       이 그룹에 묶인 동형 페이지 수
+        · group_rep_url:    이 페이지가 속한 그룹의 대표 URL
     """
     def _cb(msg: str) -> None:
         if progress_cb:
@@ -87,10 +93,18 @@ def collect_urls(
                     page.goto(cur_url, wait_until="networkidle", timeout=20000)
 
                 title = (page.title() or "").strip() or "(제목 없음)"
+                # L2: DOM 구조 골격 추출 → 지문(해시). 텍스트·값은 제외하고
+                #     태그+type+name 골격만 → 같은 템플릿 페이지는 같은 지문
+                try:
+                    skeleton = page.evaluate(_SKELETON_JS)
+                except Exception:
+                    skeleton = ""
+                fp = _fingerprint(skeleton)
                 collected.append({
-                    "url":   cur_url,
-                    "title": title[:80],
-                    "depth": depth,
+                    "url":         cur_url,
+                    "title":       title[:80],
+                    "depth":       depth,
+                    "fingerprint": fp,
                 })
                 _cb(f"   ({len(collected)}) {title[:40]}  ←  {cur_url}")
 
@@ -115,13 +129,112 @@ def collect_urls(
 
         browser.close()
 
+    # ── L1+L2 그룹핑: (식별 URL, 구조 지문)으로 동형 페이지 묶기 ──────────
+    _assign_groups(collected)
+    n_total = len(collected)
+    n_groups = len({e["group_key"] for e in collected}) if collected else 0
+    n_dup = n_total - n_groups
+
     if stopped_by_user:
-        _cb(f"URL 수집 중단 — {len(collected)}개까지 수집")
-    elif len(collected) >= max_pages:
-        _cb(f"URL 수집 한도 도달 ({max_pages}) — {len(collected)}개")
+        _cb(f"URL 수집 중단 — {n_total}개까지 수집")
+    elif n_total >= max_pages:
+        _cb(f"URL 수집 한도 도달 ({max_pages}) — {n_total}개")
     else:
-        _cb(f"URL 수집 완료 — {len(collected)}개 발견 (사이트 BFS 자연 종료)")
+        _cb(f"URL 수집 완료 — {n_total}개 발견 (사이트 BFS 자연 종료)")
+    if n_dup > 0:
+        _cb(
+            f"🧹 중복 정리 — {n_total}개 중 고유 기능 {n_groups}개 "
+            f"(동형/변형 {n_dup}개는 대표로 묶음)"
+        )
     return collected
+
+
+# ── L1: URL 노이즈 파라미터 (값이 달라도 같은 페이지 유형) ────────────────────
+# 이 파라미터들은 페이지 '정체성'을 바꾸지 않으므로 식별 URL에서 제거한다.
+#   - 페이지네이션·검색·정렬·디바이스·리다이렉트·캐시버스터
+# 반대로 bo_table/co_id/type/w/mode 등 '페이지 유형'을 가르는 파라미터는 보존.
+_NOISE_PARAMS = {
+    # 페이지네이션
+    "page", "pg", "p",
+    # 개별 레코드 ID (구조 지문이 목록 vs 상세를 구분하므로 안전)
+    "wr_id", "no", "idx", "seq",
+    # 검색·정렬 (gnuboard5 + 일반)
+    "sop", "sst", "sfl", "stx", "sca", "spt", "sword", "sort", "order", "q",
+    # 리다이렉트 대상
+    "url", "rurl", "redirect", "return", "returnurl", "ref", "next",
+    # 디바이스·캐시버스터
+    "device", "_", "t", "ts", "timestamp", "rnd", "v",
+}
+
+# L2: 구조 골격 추출 JS (텍스트·값 제외, 골격만)
+_SKELETON_JS = r"""
+() => {
+    const tags = ['form','input','select','textarea','button','a','table',
+                  'ul','ol','nav','h1','h2','h3','section','article','fieldset'];
+    const parts = [];
+    for (const el of document.querySelectorAll(tags.join(','))) {
+        let t = el.tagName.toLowerCase();
+        const ty = el.getAttribute('type');
+        if (ty) t += ':' + ty;
+        const nm = el.getAttribute('name');
+        if (nm) t += '#' + nm.replace(/\d+/g, 'N');  // 숫자 인덱스는 N으로 일반화
+        parts.push(t);
+    }
+    return parts.join(',');
+}
+"""
+
+
+def _fingerprint(skeleton: str) -> str:
+    """구조 골격 문자열 → 짧은 해시. 빈 골격은 'empty'."""
+    import hashlib
+    s = (skeleton or "").strip()
+    if not s:
+        return "empty"
+    return hashlib.md5(s.encode("utf-8")).hexdigest()[:12]
+
+
+def _identity_url(url: str) -> str:
+    """노이즈 파라미터를 제거한 '식별 URL' (L1).
+
+    같은 식별 URL + 같은 구조 지문 = 동형 페이지 그룹.
+    """
+    from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
+    try:
+        u = urlparse(_canonical(url) or url)
+        if u.query:
+            kept = [(k, v) for k, v in parse_qsl(u.query, keep_blank_values=True)
+                    if k.lower() not in _NOISE_PARAMS]
+            query = urlencode(sorted(kept))   # 정렬 → 파라미터 순서 무관
+        else:
+            query = ""
+        return urlunparse((u.scheme, u.netloc, u.path, u.params, query, ""))
+    except Exception:
+        return url
+
+
+def _assign_groups(entries: list[dict]) -> None:
+    """entries에 group_key/is_representative/group_size/group_rep_url을 채운다.
+
+    그룹 키 = (식별 URL, 구조 지문).
+      - 같은 게시판 글들(wr_id 차이)은 식별 URL·지문 동일 → 한 그룹
+      - 게시판 목록 vs 글보기는 지문이 달라 → 다른 그룹
+      - free/qa 게시판은 식별 URL(bo_table)이 달라 → 다른 그룹
+    각 그룹의 대표 = URL이 가장 짧은 항목(보통 가장 기본형).
+    """
+    groups: dict[tuple, list[dict]] = {}
+    for e in entries:
+        key = (_identity_url(e["url"]), e.get("fingerprint", "empty"))
+        e["group_key"] = repr(key)
+        groups.setdefault(e["group_key"], []).append(e)
+
+    for key, members in groups.items():
+        # 대표 선정: URL이 가장 짧은(=가장 기본형) 항목
+        rep = min(members, key=lambda m: len(m["url"]))
+        for m in members:
+            m["group_size"]       = len(members)
+            m["group_rep_url"]    = rep["url"]
+            m["is_representative"] = (m is rep)
 
 
 _INDEX_FILES = ("index.php", "index.html", "index.htm", "default.php", "default.aspx")

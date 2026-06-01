@@ -92,6 +92,7 @@ class PagePickerDialog(QDialog):
         # 노출용 결과
         self.selected_urls: list[str] = []
         self.selected_cache: dict[str, list[dict]] = {}
+        self.selected_groups: dict[str, list[str]] = {}   # 대표URL → 동형 멤버 (L4)
 
         self._worker: _CollectWorker | None = None
         self._build_ui(default_max_pages, default_max_depth)
@@ -202,6 +203,16 @@ class PagePickerDialog(QDialog):
             b.setFixedHeight(28)
             b.clicked.connect(handler)
             bulk_row.addWidget(b)
+        # 동형(중복) 페이지 숨기기 토글
+        self._hide_dup_cb = QCheckBox("동형 페이지 숨기기 (대표만 표시)")
+        self._hide_dup_cb.setChecked(True)   # 기본: 대표만 보여 깔끔하게
+        self._hide_dup_cb.setToolTip(
+            "체크: 구조가 같은 동형 페이지는 대표 1개만 표시 (권장)\n"
+            "해제: 묶인 동형 페이지도 모두 표시 (개별 선택 가능)"
+        )
+        self._hide_dup_cb.toggled.connect(self._populate_table)
+        bulk_row.addWidget(self._hide_dup_cb)
+
         bulk_row.addStretch()
 
         self._count_lbl = QLabel("선택: 0 / 0")
@@ -213,9 +224,11 @@ class PagePickerDialog(QDialog):
         bulk_row.addWidget(self._count_lbl)
         root.addLayout(bulk_row)
 
-        # 테이블
-        self._table = QTableWidget(0, 5)
-        self._table.setHorizontalHeaderLabels(["선택", "URL", "제목", "깊이", "캐시"])
+        # 테이블 (동형 열 추가 → 6열)
+        self._table = QTableWidget(0, 6)
+        self._table.setHorizontalHeaderLabels(
+            ["선택", "URL", "제목", "깊이", "동형", "캐시"]
+        )
         self._table.verticalHeader().setVisible(False)
         self._table.setEditTriggers(QTableWidget.NoEditTriggers)
         self._table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -225,10 +238,12 @@ class PagePickerDialog(QDialog):
         hh.setSectionResizeMode(2, QHeaderView.Interactive)
         hh.setSectionResizeMode(3, QHeaderView.Fixed)
         hh.setSectionResizeMode(4, QHeaderView.Fixed)
+        hh.setSectionResizeMode(5, QHeaderView.Fixed)
         self._table.setColumnWidth(0, 48)
-        self._table.setColumnWidth(2, 260)
+        self._table.setColumnWidth(2, 220)
         self._table.setColumnWidth(3, 50)
-        self._table.setColumnWidth(4, 80)
+        self._table.setColumnWidth(4, 90)
+        self._table.setColumnWidth(5, 80)
         self._table.itemChanged.connect(self._on_item_changed)
 
         # shift+click 체크박스 범위 선택용 — 마지막 클릭 row 추적
@@ -310,9 +325,15 @@ class PagePickerDialog(QDialog):
 
         self._populate_table()
 
-        msg = f"URL 수집 완료 — {len(self._urls)}개"
+        # 그룹(고유 기능) 수 = 대표 페이지 수
+        n_total  = len(self._urls)
+        n_groups = sum(1 for u in self._urls if u.get("is_representative", True))
+        n_dup    = n_total - n_groups
+        msg = f"URL 수집 완료 — {n_total}개 발견"
+        if n_dup > 0:
+            msg += f"  →  고유 기능 {n_groups}개 (동형/변형 {n_dup}개 묶음)"
         if cache_run:
-            msg += f"  |  ♻ 캐시 매칭 {len(cache_map)}개 (소스: {cache_run.name})"
+            msg += f"  |  ♻ 캐시 {len(cache_map)}개 (소스: {cache_run.name})"
         self._status_lbl.setText(msg)
         self._ok_btn.setEnabled(bool(self._urls))
 
@@ -326,10 +347,17 @@ class PagePickerDialog(QDialog):
 
     # ── 테이블 ──────────────────────────────────────────────────────────
     def _populate_table(self) -> None:
+        hide_dup = self._hide_dup_cb.isChecked()
         self._table.blockSignals(True)
         try:
             self._table.setRowCount(0)
             for entry in self._urls:
+                is_rep      = entry.get("is_representative", True)
+                group_size  = entry.get("group_size", 1)
+                # 동형 숨기기 모드: 대표만 표시 (그룹 크기 1인 단독 페이지는 항상 표시)
+                if hide_dup and not is_rep:
+                    continue
+
                 url   = entry["url"]
                 title = entry["title"]
                 depth = entry["depth"]
@@ -338,23 +366,42 @@ class PagePickerDialog(QDialog):
                 r = self._table.rowCount()
                 self._table.insertRow(r)
 
-                # 0: 체크박스
+                # 0: 체크박스 — 대표는 자동 체크, 동형(비대표)은 해제
                 chk = QTableWidgetItem()
                 chk.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable)
-                # 캐시 있는 페이지는 자동 체크 (재사용 권장)
-                chk.setCheckState(Qt.Checked if has_cache else Qt.Unchecked)
+                chk.setCheckState(Qt.Checked if is_rep else Qt.Unchecked)
                 chk.setTextAlignment(Qt.AlignCenter)
                 self._table.setItem(r, 0, chk)
 
                 # 1: URL
-                self._table.setItem(r, 1, QTableWidgetItem(url))
+                url_item = QTableWidgetItem(url)
+                if not is_rep:
+                    url_item.setForeground(Qt.gray)
+                self._table.setItem(r, 1, url_item)
                 # 2: 제목
                 self._table.setItem(r, 2, QTableWidgetItem(title))
                 # 3: 깊이
                 d_item = QTableWidgetItem(str(depth))
                 d_item.setTextAlignment(Qt.AlignCenter)
                 self._table.setItem(r, 3, d_item)
-                # 4: 캐시
+                # 4: 동형 — 대표면 "대표 +N", 비대표면 "↳ 동형"
+                if group_size > 1 and is_rep:
+                    grp_item = QTableWidgetItem(f"대표 +{group_size - 1}")
+                    grp_item.setForeground(Qt.blue)
+                    grp_item.setToolTip(
+                        f"구조가 같은 동형 페이지 {group_size}개를 대표합니다.\n"
+                        "이 1개만 분석하면 동형 페이지 전체에 TC가 적용됩니다."
+                    )
+                elif not is_rep:
+                    grp_item = QTableWidgetItem("↳ 동형")
+                    grp_item.setForeground(Qt.gray)
+                    grp_item.setToolTip(f"대표: {entry.get('group_rep_url','')}")
+                else:
+                    grp_item = QTableWidgetItem("—")
+                    grp_item.setForeground(Qt.gray)
+                grp_item.setTextAlignment(Qt.AlignCenter)
+                self._table.setItem(r, 4, grp_item)
+                # 5: 캐시
                 if has_cache:
                     n_feats = len(self._cached_features[url])
                     cache_item = QTableWidgetItem(f"♻ {n_feats}개")
@@ -363,7 +410,7 @@ class PagePickerDialog(QDialog):
                     cache_item = QTableWidgetItem("—")
                     cache_item.setForeground(Qt.gray)
                 cache_item.setTextAlignment(Qt.AlignCenter)
-                self._table.setItem(r, 4, cache_item)
+                self._table.setItem(r, 5, cache_item)
         finally:
             self._table.blockSignals(False)
         self._refresh_count()
@@ -461,4 +508,15 @@ class PagePickerDialog(QDialog):
             u: self._cached_features[u]
             for u in sel_urls if u in self._cached_features
         }
+        # L4 추적성: 선택된 대표 URL → 묶인 동형 URL 목록 (meta.json 기록용)
+        sel_set = set(sel_urls)
+        groups: dict[str, list[str]] = {}
+        for e in self._urls:
+            rep = e.get("group_rep_url", e["url"])
+            if rep in sel_set and e.get("group_size", 1) > 1:
+                groups.setdefault(rep, [])
+                if not e.get("is_representative", True):
+                    groups[rep].append(e["url"])
+        # 동형이 실제로 묶인 그룹만 (멤버 1개 이상)
+        self.selected_groups = {k: v for k, v in groups.items() if v}
         self.accept()

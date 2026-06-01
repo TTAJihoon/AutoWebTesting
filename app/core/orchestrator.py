@@ -43,6 +43,9 @@ class RunConfig:
     cached_features: dict[str, list[dict]] | None = None
     """URL → features 캐시 (과거 run에서 복사). 해당 URL은 LLM 호출 생략."""
 
+    selected_url_groups: dict[str, list[str]] | None = None
+    """대표 URL → 묶인 동형 URL 목록 (중복 정리 추적성, meta.json 기록용)."""
+
     max_pages: int = 30
     """BFS 최대 페이지 수 (selected_urls가 있으면 무시됨)."""
 
