@@ -923,6 +923,13 @@ class PipelineView(QMainWindow):
         self._write_meta("stage3_done")
         self._set_status(f"Stage 3 완료  |  TC {len(tcs)}개", active=True)
         self._append_log(f"Stage 3 완료 - TC {len(tcs)}개. Reviewer Gate를 진행하세요.")
+        # 시험 커버리지 요약 표시
+        cov = self._compute_coverage()
+        if cov:
+            self._append_log(
+                f"📊 시험 커버리지 — 고유 기능 {cov['total_unique_features']}개 중 "
+                f"{cov['designed_features']}개 설계 ({cov['coverage_pct']}%) · TC {cov['total_tcs']}개"
+            )
         # 사용자 검토 대기 — 알림으로 인지
         self._notify(
             "AWT — 검토가 필요합니다",
@@ -1358,6 +1365,33 @@ class PipelineView(QMainWindow):
                 item.setBackground(color)
                 self._tc_table.setItem(r, col, item)
 
+    # ── 커버리지 계산 ─────────────────────────────────────────────────────────
+    def _compute_coverage(self) -> dict:
+        """시험 커버리지 산출: 고유 기능 중 실제 TC가 설계된 비율.
+
+        분모 = 정제된 고유 기능 수(refine final), 없으면 leaf 수.
+        분자 = TC가 1개 이상 설계된 고유 leaf(소분류) 수.
+        """
+        try:
+            refine = (self._orch.ingest_result or {}).get("refine_report", {})
+            total = refine.get("final") or len(
+                (self._orch.ingest_result or {}).get("leaves", [])
+            )
+            # TC가 설계된 소분류 집합
+            designed_leaves = {
+                tc.get("소분류", "") for tc in (self._tcs or []) if tc.get("소분류")
+            }
+            designed = len(designed_leaves)
+            pct = round(designed / total * 100, 1) if total else 0.0
+            return {
+                "total_unique_features": total,
+                "designed_features":     designed,
+                "coverage_pct":          pct,
+                "total_tcs":             len(self._tcs or []),
+            }
+        except Exception:
+            return {}
+
     # ── 메타 저장 ─────────────────────────────────────────────────────────────
     def _write_meta(self, stage: str) -> None:
         """run의 진행 상태와 시험 환경을 meta.json에 기록.
@@ -1408,6 +1442,9 @@ class PipelineView(QMainWindow):
                 # ── 박정훈 추적성 권고: Stage 2에서 누락된 leaf 정보 ──────
                 "stage2_failed_leaves":   getattr(self._orch, "stage2_failed_leaves",   []),
                 "stage2_excluded_leaves": getattr(self._orch, "stage2_excluded_leaves", []),
+                # ── 커버리지: 기능 정제 리포트 + 시험 커버리지 % ─────────────
+                "refine_report":  (self._orch.ingest_result or {}).get("refine_report", {}),
+                "coverage":       self._compute_coverage(),
             }
             if "created_at" not in meta:
                 meta["created_at"] = now_str

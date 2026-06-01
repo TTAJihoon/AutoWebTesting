@@ -395,8 +395,37 @@ def _write_limitations_sheet(ws, tcs: list[dict], meta: dict) -> None:
             row += 1
     row += 1
 
-    # ── 3. 분석 누락 (실패 + 제외) ─────────────────────────────────────
-    _section("3. 분석에서 제외/실패한 항목 (시험 커버리지 제한)")
+    # ── 3. 시험 커버리지 ───────────────────────────────────────────────
+    _section("3. 시험 커버리지 (기능 정제 → TC 설계 비율)")
+    refine = meta.get("refine_report") or {}
+    cov = meta.get("coverage") or {}
+    if refine:
+        _kv("Stage 0 원본 기능 수",  f"{refine.get('original','?')}개")
+        _kv("노이즈 제외(UI 동작)",  f"{refine.get('removed_noise',0)}개")
+        _kv("중복 병합",            f"{refine.get('merged_dup',0)}개")
+        _kv("고유 기능 수",         f"{refine.get('final','?')}개")
+    if cov:
+        _kv("TC 설계된 고유 기능",  f"{cov.get('designed_features','?')}개")
+        _kv("총 TC 수",            f"{cov.get('total_tcs','?')}개")
+        pct = cov.get("coverage_pct", 0)
+        cov_cell_row = row
+        _kv("✅ 시험 커버리지",     f"{pct}%  (고유 기능 대비 TC 설계율)")
+        # 커버리지 색상 강조
+        try:
+            c = ws.cell(row=cov_cell_row, column=2)
+            if pct >= 90:
+                c.fill = PatternFill("solid", fgColor="C6EFCE")   # 연두
+            elif pct >= 50:
+                c.fill = PatternFill("solid", fgColor="FFEB9C")   # 노랑
+            else:
+                c.fill = PatternFill("solid", fgColor="FFC7CE")   # 빨강
+            c.font = Font(bold=True, size=10)
+        except Exception:
+            pass
+    row += 1
+
+    # ── 4. 분석 누락 (실패 + 제외) ─────────────────────────────────────
+    _section("4. 분석에서 제외/실패한 항목 (커버리지 미달 사유)")
     failed   = meta.get("stage2_failed_leaves") or []
     excluded = meta.get("stage2_excluded_leaves") or []
     _kv("분석 실패 leaf 수",  f"{len(failed)}개")
