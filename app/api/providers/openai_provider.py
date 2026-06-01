@@ -20,6 +20,21 @@ class OpenAIProvider(LLMProvider):
         self._OpenAI = OpenAI
         self._client = OpenAI(api_key=api_key)
 
+    @staticmethod
+    def _uses_completion_tokens(model: str) -> bool:
+        """이 모델이 max_completion_tokens를 요구하는지 판단.
+
+        GPT-5 계열 및 추론 모델(o1/o3/o4)은 max_tokens를 거부하고
+        max_completion_tokens만 허용한다. gpt-4 계열은 max_tokens 사용.
+        """
+        m = model.lower()
+        return (
+            m.startswith("gpt-5")
+            or m.startswith("o1")
+            or m.startswith("o3")
+            or m.startswith("o4")
+        )
+
     def chat(
         self,
         system: str,
@@ -36,7 +51,6 @@ class OpenAIProvider(LLMProvider):
 
         kwargs: dict = {
             "model": model,
-            "max_tokens": max_tokens,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -45,7 +59,29 @@ class OpenAIProvider(LLMProvider):
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
 
-        response = self._client.chat.completions.create(**kwargs)
+        # 모델별 토큰 한도 파라미터 선택 (GPT-5/o-series는 max_completion_tokens)
+        token_param = (
+            "max_completion_tokens"
+            if self._uses_completion_tokens(model)
+            else "max_tokens"
+        )
+        kwargs[token_param] = max_tokens
+
+        try:
+            response = self._client.chat.completions.create(**kwargs)
+        except Exception as e:
+            # 파라미터 이름 불일치(400) 시 반대 파라미터로 1회 자동 폴백
+            #  - 신규 모델: max_tokens 거부 → max_completion_tokens
+            #  - 구형 모델: max_completion_tokens 거부 → max_tokens
+            err = str(e)
+            if "max_completion_tokens" in err or "max_tokens" in err:
+                alt = ("max_completion_tokens"
+                       if token_param == "max_tokens" else "max_tokens")
+                kwargs.pop(token_param, None)
+                kwargs[alt] = max_tokens
+                response = self._client.chat.completions.create(**kwargs)
+            else:
+                raise
 
         choice = response.choices[0]
         text = choice.message.content or ""
