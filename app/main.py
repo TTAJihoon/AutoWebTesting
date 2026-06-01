@@ -286,6 +286,20 @@ def main() -> None:
                 meta = json.loads(meta_path.read_text(encoding="utf-8"))
             except Exception:
                 meta = {}
+
+        # 구버전 run 감지: auth_sequence 키 자체가 없으면 인증 정보가 저장되기 전
+        # (D73 이전) 생성된 run → Step 2를 복원할 수 없으므로 사용자에게 안내.
+        # 키가 있는데 빈 리스트면 '애초에 로그인 불필요'이므로 안내하지 않음.
+        if meta and "auth_sequence" not in meta:
+            QMessageBox.information(
+                dash, "복제 안내",
+                "이 실행은 인증 시퀀스(Step 2) 저장 기능이 추가되기 전에 생성되어\n"
+                "로그인 단계 정보가 남아 있지 않습니다.\n\n"
+                "URL·파일·옵션은 복원되지만, 로그인이 필요한 사이트라면\n"
+                "Step 2에서 인증 단계를 다시 입력해 주세요.\n"
+                "(이후 새로 실행하는 건은 인증 시퀀스까지 모두 복제됩니다.)"
+            )
+
         wiz = RunWizard(
             api_key=current_key,
             prefill_url=meta.get("target_url", ""),
