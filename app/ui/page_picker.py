@@ -72,7 +72,7 @@ class PagePickerDialog(QDialog):
         auth_sequence: list[dict] | None = None,
         exclude_run_id: str | None = None,
         default_max_pages: int = 30,
-        default_max_depth: int = 2,
+        default_max_depth: int = 3,
         parent=None,
     ):
         super().__init__(parent)
@@ -127,26 +127,34 @@ class PagePickerDialog(QDialog):
         opt_row.setSpacing(8)
 
         depth_lbl = QLabel("탐색 깊이:")
-        depth_lbl.setToolTip(
-            "시작 URL에서 링크를 몇 단계까지 따라갈지:\n"
+        _depth_tip = (
+            "링크를 따라가는 'BFS 확산 단계'입니다.\n"
+            "  ※ 사용자가 클릭하는 횟수가 아닙니다 — 각 페이지의 '모든 링크'를\n"
+            "     동시에 펼칩니다. 대부분의 사이트는 모든 페이지에 같은 메뉴(헤더/\n"
+            "     푸터)가 있어, 사용자가 4~5번 클릭해 가는 페이지도 보통 1~2단계로 잡힙니다.\n\n"
             "  0 = 시작 페이지만\n"
-            "  1 = 시작 페이지 + 직접 링크\n"
-            "  2 = 위 + 그 링크의 링크 (일반 사이트 권장)\n"
-            "  3+ = 매우 큰 사이트 — 시간 오래 걸림\n\n"
-            "참고: 페이지 수는 자동(사이트 BFS 자연 종료 또는 안전한도 500개)."
+            "  1 = 시작 페이지 + 메뉴 등 직접 링크된 페이지\n"
+            "  2 = 위 + 그 페이지들의 링크\n"
+            "  3 = 메뉴에 없는 깊은 계층까지 (기본·권장)\n"
+            "  4~5 = 매우 큰 사이트 — 수집 시간 증가\n\n"
+            "주의: 결제 단계처럼 '버튼/폼 제출'로만 이동하는 페이지는\n"
+            "      깊이를 올려도 못 찾습니다(BFS는 <a> 링크만 따라감).\n"
+            "참고: 페이지 수 제한 없음 (자연 종료, 안전 상한 500)."
         )
+        depth_lbl.setToolTip(_depth_tip)
         opt_row.addWidget(depth_lbl)
         self._max_depth_spin = QSpinBox()
         self._max_depth_spin.setRange(0, 5)
         self._max_depth_spin.setValue(max_depth)
         self._max_depth_spin.setFixedWidth(60)
-        self._max_depth_spin.setToolTip(depth_lbl.toolTip())
+        self._max_depth_spin.setToolTip(_depth_tip)
         opt_row.addWidget(self._max_depth_spin)
 
         depth_inline = QLabel(
-            "  (0=시작 URL만 · 1=직접 링크 · 2=권장 · 3+=느림)"
+            "  (클릭 횟수 아님 · 메뉴 경유라 보통 충분 · 3=권장)"
         )
         depth_inline.setStyleSheet("QLabel { color:#94a3b8; font-size:11px; }")
+        depth_inline.setToolTip(_depth_tip)
         opt_row.addWidget(depth_inline)
 
         opt_row.addStretch()
