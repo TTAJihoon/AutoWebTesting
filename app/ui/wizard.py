@@ -441,19 +441,30 @@ class RunWizard(QDialog):
         return w
 
     def _page3(self) -> QWidget:
-        """실행 옵션."""
+        """실행 옵션 (내용이 많아 스크롤 가능)."""
+        from PySide6.QtWidgets import QScrollArea
+        outer = QWidget()
+        outer_lay = QVBoxLayout(outer)
+        outer_lay.setContentsMargins(0, 0, 0, 0)
+        outer_lay.addWidget(QLabel("<b>Step 3: 실행 옵션</b>"))
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(scroll.Shape.NoFrame)
+        outer_lay.addWidget(scroll, 1)
+
         w = QWidget()
         lay = QVBoxLayout(w)
         lay.setSpacing(16)
+        scroll.setWidget(w)
 
-        lay.addWidget(QLabel("<b>Step 3: 실행 옵션</b>"))
-
-        # ── 모델 선택 ────────────────────────────────────────────────────
-        model_box = QGroupBox("LLM 모델")
-        m_lay = QVBoxLayout(model_box)
-        self._model_combo = QComboBox()
         provider = get_active_provider()
         models = _MODELS.get(provider, [])
+
+        # ── 모델 선택 (전역 기본) ────────────────────────────────────────
+        model_box = QGroupBox("LLM 모델 (모든 단계 기본)")
+        m_lay = QVBoxLayout(model_box)
+        self._model_combo = QComboBox()
         for model_id, label in models:
             self._model_combo.addItem(label, userData=model_id)
         if not models:
@@ -463,6 +474,44 @@ class RunWizard(QDialog):
         provider_hint.setStyleSheet("color:#888; font-size:11px;")
         m_lay.addWidget(provider_hint)
         lay.addWidget(model_box)
+
+        # ── 단계별 모델 (선택) ───────────────────────────────────────────
+        # 체크 시 단계마다 모델 따로 지정 — 대량 단계는 저가 모델, 품질 단계는 상위 모델
+        self._stage_model_box = QGroupBox("단계별 모델 따로 지정 (선택 — 비용/품질 최적화)")
+        self._stage_model_box.setCheckable(True)
+        self._stage_model_box.setChecked(False)
+        self._stage_model_box.setToolTip(
+            "체크하면 파이프라인 단계마다 다른 모델을 쓸 수 있습니다.\n"
+            "예) 대량 추출(DOM/통합)은 저가 nano, TC 설계는 상위 모델.\n"
+            "각 항목 '(기본 모델)'은 위 전역 모델을 따릅니다."
+        )
+        sm_lay = QVBoxLayout(self._stage_model_box)
+        # (contract_id, 표시명) — 비용 큰 순
+        self._STAGE_CONTRACTS = [
+            ("DOM_SPEC",            "① 웹 요소 분석 (Stage 0, 호출 多)"),
+            ("FEATURE_CONSOLIDATE", "② 기능 통합 (Stage 1b, 호출 多)"),
+            ("TC_DESIGN",           "③ TC 설계 (Stage 2, 품질 중요)"),
+            ("TC_REGEN",            "④ TC 재작성 (Stage 3)"),
+            ("FAILURE_ANALYSIS",    "⑤ 실패 원인 분석 (Stage 6)"),
+            ("PATTERN_EXTRACT",     "⑥ 결함 패턴 추출 (Stage 6B)"),
+        ]
+        self._stage_model_combos: dict[str, QComboBox] = {}
+        for cid, label in self._STAGE_CONTRACTS:
+            row = QHBoxLayout()
+            lbl = QLabel(label)
+            lbl.setFixedWidth(260)
+            lbl.setStyleSheet("font-size:11px; color:#374151;")
+            row.addWidget(lbl)
+            combo = QComboBox()
+            combo.addItem("(기본 모델)", userData=None)
+            for model_id, mlabel in models:
+                # 콤보가 길어지지 않게 짧은 라벨 사용 (모델 ID 기준)
+                combo.addItem(model_id, userData=model_id)
+            combo.setStyleSheet("font-size:11px;")
+            row.addWidget(combo, 1)
+            sm_lay.addLayout(row)
+            self._stage_model_combos[cid] = combo
+        lay.addWidget(self._stage_model_box)
 
         # ── INFERRED 임계값 ──────────────────────────────────────────────
         thresh_box = QGroupBox("INFERRED 비율 임계값")
@@ -560,7 +609,7 @@ class RunWizard(QDialog):
         summary_lbl.setWordWrap(True)
         summary_lbl.setStyleSheet("color:#555;")
         lay.addWidget(summary_lbl)
-        return w
+        return outer
 
     # ── 네비게이션 ────────────────────────────────────────────────────────
     def _go_next(self) -> None:
@@ -658,6 +707,13 @@ class RunWizard(QDialog):
 
     def _finish(self) -> None:
         model_override = self._model_combo.currentData()
+        # 단계별 모델 — 체크됐고 '(기본 모델)'이 아닌 항목만 수집
+        model_overrides: dict[str, str] = {}
+        if self._stage_model_box.isChecked():
+            for cid, combo in self._stage_model_combos.items():
+                m = combo.currentData()
+                if m:
+                    model_overrides[cid] = m
         config = RunConfig(
             api_key=self._api_key,
             target_url=self._url_edit.text().strip(),
@@ -669,6 +725,7 @@ class RunWizard(QDialog):
             inferred_threshold=self._thresh_spin.value(),
             max_leaves=self._max_leaves_spin.value(),
             model_override=model_override,
+            model_overrides=model_overrides or None,
             headless_exec=not self._headless_cb.isChecked(),  # 체크 = 보이게 (headless=False)
             slow_mo_ms=self._slowmo_spin.value() if self._headless_cb.isChecked() else 0,
         )
@@ -714,6 +771,17 @@ class RunWizard(QDialog):
                 if self._model_combo.itemData(i) == model_id:
                     self._model_combo.setCurrentIndex(i)
                     break
+        # 단계별 모델 복원
+        overrides = cfg.get("model_overrides") or {}
+        if overrides:
+            self._stage_model_box.setChecked(True)
+            for cid, mid in overrides.items():
+                combo = self._stage_model_combos.get(cid)
+                if combo:
+                    for i in range(combo.count()):
+                        if combo.itemData(i) == mid:
+                            combo.setCurrentIndex(i)
+                            break
         if "inferred_threshold" in cfg and cfg["inferred_threshold"] is not None:
             try:
                 self._thresh_spin.setValue(float(cfg["inferred_threshold"]))

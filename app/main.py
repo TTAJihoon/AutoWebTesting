@@ -207,6 +207,7 @@ def main() -> None:
             inferred_threshold=meta.get("inferred_threshold", 0.30),
             max_leaves=meta.get("max_leaves", 50),
             model_override=meta.get("model_override"),
+            model_overrides=meta.get("model_overrides") or None,
             max_pages=meta.get("max_pages", 30),
             headless_exec=meta.get("headless_exec", True),
             slow_mo_ms=meta.get("slow_mo_ms", 0),

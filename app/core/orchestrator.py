@@ -35,8 +35,12 @@ class RunConfig:
     무료 플랜(20회/일) 기준: 50이면 약 50회 TC_DESIGN 호출 필요.
     유료 플랜이면 0으로 설정해 제한 없이 실행."""
     model_override: str | None = None
-    """Contract frontmatter 모델을 이 모델로 교체. 예: 'gemini-2.5-flash'.
+    """Contract frontmatter 모델을 이 모델로 교체 (전역 기본). 예: 'gemini-2.5-flash'.
     None이면 각 Contract의 model 그대로 사용."""
+
+    model_overrides: dict[str, str] | None = None
+    """단계(contract_id)별 모델 지정. 예: {'DOM_SPEC':'gpt-5.4-nano', 'TC_DESIGN':'gpt-5.4'}.
+    우선순위: model_overrides[contract] > model_override > contract 기본."""
 
     selected_urls: list[str] | None = None
     """페이지 선택 다이얼로그에서 선택된 URL 목록. None이면 BFS 전체."""
@@ -112,6 +116,7 @@ class Orchestrator:
             api_key=config.api_key,
             run_id=config.run_id,
             model_override=config.model_override,
+            model_overrides=config.model_overrides,
             progress_cb=self._cb,
         )
         self.tcs: list[dict] = []

@@ -1471,6 +1471,7 @@ class PipelineView(QMainWindow):
                 "updated_at":     now_str,
                 # ── 시험 환경 (재현용) ─────────────────────────────────────
                 "model_override": cfg.model_override,
+                "model_overrides": cfg.model_overrides or {},
                 "headless_exec":  cfg.headless_exec,
                 "slow_mo_ms":     cfg.slow_mo_ms,
                 "max_leaves":     cfg.max_leaves,

@@ -55,6 +55,7 @@ class LLMClient:
         run_id: str,
         provider_override: str | None = None,
         model_override: str | None = None,
+        model_overrides: dict[str, str] | None = None,
         progress_cb: Any = None,
     ):
         """
@@ -62,15 +63,18 @@ class LLMClient:
             api_key: 선택된 provider의 API 키 (UI/.env에서 주입)
             run_id: 실행 ID — 로그 디렉터리 구분
             provider_override: 명시적 provider 이름 (테스트·실험용). 통상은 None — Contract model에서 자동 라우팅
-            model_override: Contract frontmatter의 model을 이 값으로 교체.
+            model_override: Contract frontmatter의 model을 이 값으로 교체 (전역 기본).
                 예) "gemini-3.5-flash" 설정 시 모든 Contract가 Gemini로 실행됨.
                 None이면 각 Contract의 model을 그대로 사용.
+            model_overrides: 단계(contract_id)별 모델 지정 맵. 예) {"DOM_SPEC":"gpt-5.4-nano"}.
+                우선순위: model_overrides[contract_id] > model_override > contract.model
             progress_cb: 재시도 메시지를 GUI 로그로 전달하기 위한 콜백 (선택)
         """
         self._api_key = api_key
         self._run_id = run_id
         self._provider_override = provider_override
         self._model_override = model_override
+        self._model_overrides = model_overrides or {}
         self._progress_cb = progress_cb
         self._log_dir = _LOG_DIR / run_id / "llm"
         self._log_dir.mkdir(parents=True, exist_ok=True)
@@ -118,8 +122,12 @@ class LLMClient:
         503/429 일시 오류는 최대 3회 지수 백오프 재시도.
         """
         contract = load_contract(contract_id)
-        # model_override가 있으면 Contract 모델 대신 사용 (다른 provider 전환 시)
-        effective_model = self._model_override or contract.model
+        # 모델 우선순위: 단계별 지정 > 전역 override > Contract 기본
+        effective_model = (
+            self._model_overrides.get(contract_id)
+            or self._model_override
+            or contract.model
+        )
 
         # 캐시 키에 model 포함 (다른 모델은 다른 결과 — D48)
         cache_inputs = dict(inputs)

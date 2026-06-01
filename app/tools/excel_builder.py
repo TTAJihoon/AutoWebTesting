@@ -335,7 +335,11 @@ def _write_limitations_sheet(ws, tcs: list[dict], meta: dict) -> None:
     _kv("종료 일시",             meta.get("updated_at"))
     _kv("대상 URL",              meta.get("target_url"))
     _kv("최종 단계",             meta.get("stage"))
-    _kv("LLM 모델",              meta.get("model_override") or "(contract 기본값)")
+    _kv("LLM 모델 (기본)",       meta.get("model_override") or "(contract 기본값)")
+    _mo = meta.get("model_overrides") or {}
+    if _mo:
+        _kv("단계별 모델",
+            ", ".join(f"{k}={v}" for k, v in _mo.items()))
     _kv("브라우저 모드",         "헤드리스" if meta.get("headless_exec", True) else "헤드풀(표시)")
     _kv("슬로우 모드(ms)",       meta.get("slow_mo_ms", 0))
     _kv("INFERRED 임계값",       meta.get("inferred_threshold"))
