@@ -1420,10 +1420,12 @@ class PipelineView(QMainWindow):
         분자 = TC가 1개 이상 설계된 고유 leaf(소분류) 수.
         """
         try:
-            refine = (self._orch.ingest_result or {}).get("refine_report", {})
-            total = refine.get("final") or len(
-                (self._orch.ingest_result or {}).get("leaves", [])
-            )
+            ing = self._orch.ingest_result or {}
+            # 통합(consolidate) 후 leaf 수가 최종 고유 기능 수
+            total = len(ing.get("leaves", []))
+            if not total:
+                refine = ing.get("refine_report", {})
+                total = refine.get("final", 0)
             # TC가 설계된 소분류 집합
             designed_leaves = {
                 tc.get("소분류", "") for tc in (self._tcs or []) if tc.get("소분류")
@@ -1489,9 +1491,10 @@ class PipelineView(QMainWindow):
                 # ── 박정훈 추적성 권고: Stage 2에서 누락된 leaf 정보 ──────
                 "stage2_failed_leaves":   getattr(self._orch, "stage2_failed_leaves",   []),
                 "stage2_excluded_leaves": getattr(self._orch, "stage2_excluded_leaves", []),
-                # ── 커버리지: 기능 정제 리포트 + 시험 커버리지 % ─────────────
-                "refine_report":  (self._orch.ingest_result or {}).get("refine_report", {}),
-                "coverage":       self._compute_coverage(),
+                # ── 커버리지: 기능 정제/통합 리포트 + 시험 커버리지 % ────────
+                "refine_report":      (self._orch.ingest_result or {}).get("refine_report", {}),
+                "consolidate_report": (self._orch.ingest_result or {}).get("consolidate_report", {}),
+                "coverage":           self._compute_coverage(),
             }
             if "created_at" not in meta:
                 meta["created_at"] = now_str

@@ -398,12 +398,16 @@ def _write_limitations_sheet(ws, tcs: list[dict], meta: dict) -> None:
     # ── 3. 시험 커버리지 ───────────────────────────────────────────────
     _section("3. 시험 커버리지 (기능 정제 → TC 설계 비율)")
     refine = meta.get("refine_report") or {}
+    consol = meta.get("consolidate_report") or {}
     cov = meta.get("coverage") or {}
     if refine:
         _kv("Stage 0 원본 기능 수",  f"{refine.get('original','?')}개")
         _kv("노이즈 제외(UI 동작)",  f"{refine.get('removed_noise',0)}개")
-        _kv("중복 병합",            f"{refine.get('merged_dup',0)}개")
-        _kv("고유 기능 수",         f"{refine.get('final','?')}개")
+        _kv("규칙 중복 병합",        f"{refine.get('merged_dup',0)}개")
+        _kv("규칙 정제 후",          f"{refine.get('final','?')}개")
+    if consol and not consol.get("skipped"):
+        _kv("LLM 의미 통합 전",      f"{consol.get('before','?')}개")
+        _kv("LLM 의미 통합 후(고유)", f"{consol.get('after','?')}개")
     if cov:
         _kv("TC 설계된 고유 기능",  f"{cov.get('designed_features','?')}개")
         _kv("총 TC 수",            f"{cov.get('total_tcs','?')}개")

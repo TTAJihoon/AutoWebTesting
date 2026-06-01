@@ -9,6 +9,7 @@ from app.api.llm_client import LLMClient
 from app.core import (
     stage0_dom_scan,
     stage1_ingest,
+    stage1b_consolidate,
     stage2_tc_design,
     stage3_verify,
     stage5_execute,
@@ -45,6 +46,10 @@ class RunConfig:
 
     selected_url_groups: dict[str, list[str]] | None = None
     """대표 URL → 묶인 동형 URL 목록 (중복 정리 추적성, meta.json 기록용)."""
+
+    consolidate_features: bool = True
+    """Stage 1 후 LLM으로 의미 기준 기능 통합(중복 병합) 수행 여부.
+    DOM 스캔이 전역 컴포넌트를 페이지마다 재추출하는 중복을 줄임."""
 
     max_pages: int = 30
     """BFS 최대 페이지 수 (selected_urls가 있으면 무시됨)."""
@@ -182,6 +187,16 @@ class Orchestrator:
             feature_spec=feature_spec,
             progress_cb=self._cb,
         )
+        # ── Stage 1b: LLM 의미 기준 기능 통합 (중복 병합) ──────────────────
+        if self.config.consolidate_features and self.ingest_result.get("leaves"):
+            consolidated, creport = stage1b_consolidate.consolidate(
+                self.ingest_result["leaves"],
+                llm_client=self.llm,
+                progress_cb=self._cb,
+                should_stop=self.is_stopped,
+            )
+            self.ingest_result["leaves"] = consolidated
+            self.ingest_result["consolidate_report"] = creport
         self._stage = 1
         return self.ingest_result
 

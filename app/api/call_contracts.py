@@ -47,6 +47,7 @@ def load(contract_id: str) -> Contract:
         "TC_REGEN":        "tc_regen",
         "FAILURE_ANALYSIS":"failure_analysis",
         "PATTERN_EXTRACT": "pattern_extract",
+        "FEATURE_CONSOLIDATE": "feature_consolidate",
     }
     fname = name_map.get(contract_id, contract_id.lower())
     path = _PROMPTS_DIR / f"{fname}.md"
