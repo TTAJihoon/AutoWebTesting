@@ -82,8 +82,29 @@ class LLMClient:
     def _get_provider(self, model: str) -> LLMProvider:
         name = self._provider_override or provider_name_for_model(model)
         if name not in self._providers:
-            self._providers[name] = resolve_provider(model, self._api_key)
+            key = self._key_for_provider(name)
+            self._providers[name] = resolve_provider(model, key)
         return self._providers[name]
+
+    def _key_for_provider(self, provider_name: str) -> str:
+        """모델이 가리키는 provider에 '맞는' API 키를 반환.
+
+        생성자에서 받은 self._api_key는 한 provider용일 뿐이라,
+        model_override가 다른 provider 모델일 때(재개·복제 등) 키가 어긋난다.
+        → provider별 키를 settings에서 직접 조회해 불일치를 방지.
+        (예: 구글 키가 OpenAI 엔드포인트로 가서 401 나는 문제)
+        """
+        try:
+            from app.config.settings import load_api_key, get_active_provider
+            # 생성자 키가 이 provider용이면(활성 provider와 일치) 그대로 사용
+            if provider_name == get_active_provider() and self._api_key:
+                return self._api_key
+            key = load_api_key(provider_name)
+            if key:
+                return key
+        except Exception:
+            pass
+        return self._api_key
 
     def call(
         self,

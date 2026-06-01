@@ -76,6 +76,7 @@ def design(
     progress_cb: Callable[[str], None] | None = None,
     failed_leaves_out: list[dict] | None = None,    # 추적성용: 실패한 leaf 정보 기록처
     excluded_leaves_out: list[dict] | None = None,  # 추적성용: max_leaves cap으로 제외된 leaf
+    should_stop: Callable[[], bool] | None = None,  # 사용자 중단 신호 (협력적)
 ) -> list[dict]:
     """모든 leaf에 대해 TC를 생성해 단일 리스트로 반환.
 
@@ -127,7 +128,13 @@ def design(
     all_tcs: list[dict] = []
     failed_leaves: list[tuple[int, str, str]] = []   # (idx, leaf명, 오류요약)
 
+    stopped = False
     for leaf_idx, leaf in enumerate(leaves, 1):
+        # 사용자 중단 협력 체크 (다음 leaf 시작 전)
+        if should_stop and should_stop():
+            _cb(f"⏹ 사용자 중단 — TC 설계 종료 ({leaf_idx-1}/{len(leaves)}개 처리, TC {len(all_tcs)}개)")
+            stopped = True
+            break
         leaf_num = f"{leaf_idx:03d}"
         tc_id_start = f"TC-{leaf_num}-001"
         excerpt = excerpt_for_leaf(manual_text, leaf)

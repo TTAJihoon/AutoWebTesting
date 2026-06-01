@@ -104,6 +104,9 @@ class _PreGateWorker(QThread):
         self._has_files = has_files
         self._reuse_stage0 = reuse_stage0   # 기존 Stage 0 draft 재사용 (재스캔 생략)
 
+    # 사용자 중단 시그널 — 중단되어도 부분 TC를 넘김
+    stopped = Signal(list)
+
     def run(self) -> None:
         try:
             feature_spec = None
@@ -115,10 +118,17 @@ class _PreGateWorker(QThread):
                         feature_spec = self._orch.run_stage0()
                 else:
                     feature_spec = self._orch.run_stage0()
+                if self._orch.is_stopped():
+                    self.stopped.emit([]); return
                 self.stage_done.emit(1)
             self._orch.run_stage1(feature_spec)
+            if self._orch.is_stopped():
+                self.stopped.emit([]); return
             self.stage_done.emit(2)
             self._orch.run_stage2()
+            if self._orch.is_stopped():
+                # Stage 2 중단 — 지금까지 만든 TC가 있으면 보존
+                self.stopped.emit(self._orch.tcs or []); return
             self.stage_done.emit(3)
             tcs = self._orch.run_stage3()
             self.stage_done.emit(4)
@@ -883,6 +893,12 @@ class PipelineView(QMainWindow):
         self._set_status("Stage 1~3 실행 중")
         self._append_log("Stage 1~3 시작...")
 
+        # Stage 1~3 중단 버튼 노출 + 플래그 리셋
+        self._orch.set_stopped(False)
+        self._stop_btn.setText("⏹  중단")
+        self._stop_btn.setEnabled(True)
+        self._stop_btn.setVisible(True)
+
         self._pre_worker = _PreGateWorker(
             orch=self._orch,
             has_files=bool(self._config.input_files),
@@ -890,8 +906,32 @@ class PipelineView(QMainWindow):
         )
         self._pre_worker.stage_done.connect(self._on_pre_stage_done)
         self._pre_worker.finished.connect(self._on_pre_gate_done)
+        self._pre_worker.stopped.connect(self._on_pre_gate_stopped)
         self._pre_worker.error.connect(self._on_error)
         self._pre_worker.start()
+
+    def _on_pre_gate_stopped(self, partial_tcs: list) -> None:
+        """Stage 1~3 사용자 중단 — 부분 TC가 있으면 보존하고 Gate 진행 가능."""
+        self._stop_btn.setVisible(False)
+        self._pause_btn.setVisible(False)
+        self._set_status("Stage 1~3 중단됨", active=False, running=False)
+        if partial_tcs:
+            self._tcs = partial_tcs
+            self._orch.tcs = partial_tcs
+            self._refresh_tc_table()
+            self._append_log(
+                f"⏹ 중단됨 — 지금까지 설계된 TC {len(partial_tcs)}개를 보존했습니다. "
+                f"Reviewer Gate로 진행하거나 다시 실행할 수 있습니다."
+            )
+            self._run_btn.setVisible(False)
+            self._gate_btn.setVisible(True)
+            self._gate_btn.setEnabled(True)
+            self._exec_btn.setVisible(True)
+            self._exec_btn.setEnabled(False)
+        else:
+            self._append_log("⏹ 중단됨 — 설계된 TC가 없습니다. 다시 실행하세요.")
+            self._run_btn.setVisible(True)
+            self._run_btn.setEnabled(True)
 
     def _on_pre_stage_done(self, n: int) -> None:
         """stage_done emit: n = 현재 진입한 단계 (1~4)."""
@@ -901,6 +941,8 @@ class PipelineView(QMainWindow):
 
     def _on_pre_gate_done(self, tcs: list) -> None:
         self._tcs = tcs
+        # Stage 1~3 정상 완료 → 중단 버튼 숨김
+        self._stop_btn.setVisible(False)
         # 진행이 갱신됐으므로 스냅샷 상태 초기화
         self._viewing_snapshot = None
         self._latest_tcs_backup = None
@@ -996,10 +1038,13 @@ class PipelineView(QMainWindow):
 
     def _request_stop(self) -> None:
         from PySide6.QtWidgets import QMessageBox as _MB
+        # 현재 실행 중인 단계 판별 (pre-gate=Stage 1~3, post-gate=Stage 5~7)
+        pre_running  = self._pre_worker is not None and self._pre_worker.isRunning()
+        unit = "현재 항목(페이지/기능) 완료 후 Stage 1~3" if pre_running else "현재 TC 완료 후 Stage 5"
         res = _MB.question(
             self, "중단 확인",
-            "현재 TC 완료 후 Stage 5 실행을 중단합니다.\n"
-            "지금까지 실행된 결과는 보존됩니다. 계속하시겠습니까?",
+            f"{unit} 실행을 중단합니다.\n"
+            "지금까지 처리된 결과는 보존됩니다. 계속하시겠습니까?",
             _MB.Yes | _MB.No, _MB.No,
         )
         if res != _MB.Yes:
@@ -1010,7 +1055,7 @@ class PipelineView(QMainWindow):
             self._orch.set_paused(False)
         self._pause_btn.setEnabled(False)
         self._stop_btn.setEnabled(False)
-        self._append_log("⏹  중단 요청 — 현재 TC 완료 후 종료")
+        self._append_log("⏹  중단 요청 — 현재 항목 완료 후 종료합니다")
 
     def _on_post_stage_done(self, n: int) -> None:
         """stage_done emit: n = 방금 완료된 단계(5~7). n+1이 다음 활성."""
@@ -1170,11 +1215,13 @@ class PipelineView(QMainWindow):
 
     # ── 오류 처리 ─────────────────────────────────────────────────────────────
     def _on_error(self, msg: str) -> None:
-        # 어느 단계에서 실패했든 실행 버튼 복원
+        # 어느 단계에서 실패했든 실행 버튼 복원 + 중단 버튼 숨김
         self._run_btn.setEnabled(True)
         if not self._run_btn.isVisible():
             self._exec_btn.setEnabled(True)
-        self._set_status("오류 발생")
+        self._stop_btn.setVisible(False)
+        self._pause_btn.setVisible(False)
+        self._set_status("오류 발생", active=False, running=False)
         self._append_log(f"[오류]\n{msg}")
         # 시스템 트레이 알림 (백그라운드 실행 중에도 인지 가능)
         first_line = msg.splitlines()[0][:120] if msg else ""

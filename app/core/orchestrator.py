@@ -145,6 +145,7 @@ class Orchestrator:
             progress_cb=self._cb,
             selected_urls=self.config.selected_urls,
             cached_features=self.config.cached_features,
+            should_stop=self.is_stopped,
         )
         self._stage = 0
         return result
@@ -198,6 +199,7 @@ class Orchestrator:
             progress_cb=self._cb,
             failed_leaves_out=self.stage2_failed_leaves,
             excluded_leaves_out=self.stage2_excluded_leaves,
+            should_stop=self.is_stopped,
         )
         self._save_intermediate("tc_raw")
         self._stage = 2

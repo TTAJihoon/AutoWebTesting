@@ -64,6 +64,7 @@ def scan(
     progress_cb: Callable[[str], None] | None = None,
     selected_urls: list[str] | None = None,
     cached_features: dict[str, list[dict]] | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> dict:
     """URL을 스캔해 feature-spec-draft.md 생성. LLM 명세 초안 반환.
 
@@ -126,6 +127,10 @@ def scan(
             total_pages = max_pages
 
         while queue and len(visited) < total_pages:
+            # 사용자 중단 협력 체크 (다음 페이지 시작 전)
+            if should_stop and should_stop():
+                _cb("⏹ 사용자 중단 — 페이지 분석 종료")
+                break
             cur_url, depth = queue.pop(0)
             if cur_url in visited:
                 continue
