@@ -98,16 +98,23 @@ class _PreGateWorker(QThread):
     finished   = Signal(list)
     error      = Signal(str)
 
-    def __init__(self, orch: Orchestrator, has_files: bool):
+    def __init__(self, orch: Orchestrator, has_files: bool, reuse_stage0: bool = False):
         super().__init__()
         self._orch      = orch
         self._has_files = has_files
+        self._reuse_stage0 = reuse_stage0   # 기존 Stage 0 draft 재사용 (재스캔 생략)
 
     def run(self) -> None:
         try:
             feature_spec = None
             if not self._has_files:
-                feature_spec = self._orch.run_stage0()
+                if self._reuse_stage0:
+                    # 기존 분석 결과 로드 — DOM 재스캔/페이지선택 생략
+                    feature_spec = self._orch.load_stage0_draft()
+                    if feature_spec is None:
+                        feature_spec = self._orch.run_stage0()
+                else:
+                    feature_spec = self._orch.run_stage0()
                 self.stage_done.emit(1)
             self._orch.run_stage1(feature_spec)
             self.stage_done.emit(2)
@@ -823,6 +830,24 @@ class PipelineView(QMainWindow):
             not self._config.target_url
             or self._config.target_url.lower().startswith("file://")
         )
+
+        # ── 기존 Stage 0 분석 결과가 있으면 재사용 여부 확인 ──────────────
+        # (이력에서 다시 연 run 등 — 페이지 재수집·재스캔 없이 바로 Stage 1~3)
+        reuse_stage0 = False
+        if not skip_stage0 and self._orch.has_stage0_draft():
+            res = QMessageBox.question(
+                self, "기존 분석 결과 발견",
+                "이 실행에는 이미 완료된 웹사이트 분석 결과(Stage 0)가 있습니다.\n\n"
+                "  • [Yes] 기존 결과 재사용 — 페이지 재수집·재분석 없이 바로 Stage 1~3 진행 (빠름)\n"
+                "  • [No]  새로 분석 — 페이지를 다시 수집·선택 (사이트가 변경된 경우)\n",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if res == QMessageBox.Yes:
+                reuse_stage0 = True
+                skip_stage0 = True   # picker 생략
+                self._append_log("♻ 기존 Stage 0 분석 결과를 재사용합니다 (페이지 재수집 생략).")
+
         if not skip_stage0:
             picker = PagePickerDialog(
                 start_url=self._config.target_url,
@@ -861,6 +886,7 @@ class PipelineView(QMainWindow):
         self._pre_worker = _PreGateWorker(
             orch=self._orch,
             has_files=bool(self._config.input_files),
+            reuse_stage0=reuse_stage0,
         )
         self._pre_worker.stage_done.connect(self._on_pre_stage_done)
         self._pre_worker.finished.connect(self._on_pre_gate_done)

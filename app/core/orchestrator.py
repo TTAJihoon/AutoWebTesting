@@ -149,6 +149,29 @@ class Orchestrator:
         self._stage = 0
         return result
 
+    def has_stage0_draft(self) -> bool:
+        """이 run에 Stage 0 분석 결과(feature-spec-draft.json)가 이미 있는지."""
+        draft = self.run_dir / "dom-scan" / "feature-spec-draft.json"
+        return draft.exists()
+
+    def load_stage0_draft(self) -> dict | None:
+        """기존 Stage 0 분석 결과를 그대로 로드 (재스캔 없이 Stage 1로 진입).
+
+        run_stage0()가 반환하던 draft dict와 동일한 형태를 반환한다.
+        """
+        import json
+        draft_path = self.run_dir / "dom-scan" / "feature-spec-draft.json"
+        if not draft_path.exists():
+            return None
+        try:
+            draft = json.loads(draft_path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        n_feat = len(draft.get("features", []))
+        self._cb(f"♻ 기존 웹사이트 분석 결과 재사용 — 기능 {n_feat}개 (재스캔 생략)")
+        self._stage = 0
+        return draft
+
     # ── Stage 1 ──────────────────────────────────────────────────────────
     def run_stage1(self, feature_spec: dict | None = None) -> dict:
         self._cb("▶ Stage 1: 파일 파싱·정규화")
