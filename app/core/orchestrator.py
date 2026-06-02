@@ -213,6 +213,21 @@ class Orchestrator:
             )
             self.ingest_result["leaves"] = consolidated
             self.ingest_result["consolidate_report"] = creport
+        # ── D52: 최종 대분류 통제 어휘 sweep ──────────────────────────────────
+        # consolidate(LLM)가 통제 어휘 밖 대분류를 생성했을 수 있으므로 한 번 더 보정.
+        # _refine_leaves에서 이미 보정된 값은 idempotent(그대로 유지).
+        leaves = self.ingest_result.get("leaves") or []
+        if leaves:
+            from app.core.taxonomy import coerce_major
+            swept = 0
+            for lf in leaves:
+                canon, status = coerce_major(lf.get("category_major", "") or "")
+                if canon != (lf.get("category_major", "") or ""):
+                    lf.setdefault("category_major_raw", lf.get("category_major", ""))
+                    lf["category_major"] = canon
+                    swept += 1
+            if swept:
+                self._cb(f"  대분류 통제 어휘 보정(통합 후) — {swept}개 추가 정규화")
         self._stage = 1
         return self.ingest_result
 

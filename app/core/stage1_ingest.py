@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Callable
 
 from app.tools.file_parser import parse
+from app.core.taxonomy import coerce_major, TAXONOMY_VERSION
 
 
 def ingest(
@@ -130,6 +131,8 @@ def _refine_leaves(raw_leaves: list[dict]) -> tuple[list[dict], dict]:
     original = len(raw_leaves)
     removed_noise = 0
     merged_dup = 0
+    coerced_major = 0                       # D52 — 통제 어휘로 보정된 leaf 수
+    unknown_samples: list[str] = []         # 통제 어휘 밖(원본 유지) 대분류 샘플
 
     seen: dict[tuple, dict] = {}
     noise_samples: list[str] = []
@@ -139,6 +142,17 @@ def _refine_leaves(raw_leaves: list[dict]) -> tuple[list[dict], dict]:
             if len(noise_samples) < 20:
                 noise_samples.append(lf.get("category_leaf", ""))
             continue
+        # ── D52: 대분류 통제 어휘 보정 (dedup 키 계산 전에 수행해야
+        #         "User Management"/"Authentication"/"Account" 같은 인증 분열이
+        #         단일 "회원·인증"으로 합쳐져 실제 중복 병합이 일어난다) ──────────
+        raw_major = lf.get("category_major", "") or ""
+        canon, status = coerce_major(raw_major)
+        if status == "coerced":
+            coerced_major += 1
+            lf["category_major_raw"] = raw_major   # 추적성
+        elif status == "unknown" and len(unknown_samples) < 30:
+            unknown_samples.append(raw_major)
+        lf["category_major"] = canon
         key = (
             (lf.get("category_major", "") or "").strip().lower(),
             (lf.get("category_mid", "") or "").strip().lower(),
@@ -157,11 +171,15 @@ def _refine_leaves(raw_leaves: list[dict]) -> tuple[list[dict], dict]:
 
     leaves = list(seen.values())
     report = {
-        "original":       original,
-        "removed_noise":  removed_noise,
-        "merged_dup":     merged_dup,
-        "final":          len(leaves),
-        "noise_samples":  noise_samples,
+        "original":         original,
+        "removed_noise":    removed_noise,
+        "merged_dup":       merged_dup,
+        "final":            len(leaves),
+        "noise_samples":    noise_samples,
+        # D52 — 통제 어휘 보정 결과
+        "taxonomy_version":     TAXONOMY_VERSION,
+        "coerced_major":        coerced_major,
+        "unknown_major_samples": unknown_samples,
     }
     return leaves, report
 

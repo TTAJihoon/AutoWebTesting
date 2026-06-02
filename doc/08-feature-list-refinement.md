@@ -82,24 +82,30 @@ run `89f3ba56` (TC 484건) 실측:
 
 **아이디어**: `category_major`를 **고정 목록 중 선택**으로 강제해 도메인 분열을 제거한다.
 
-**통제 어휘 (초안, 웹 일반 + ISO 25023 친화)** — `app/core/taxonomy.py`(신규)에 단일 정의:
+**통제 어휘 (확정 12종)** — `app/core/taxonomy.py`(신규)에 단일 정의:
 ```
-인증·계정 / 회원관리 / 게시판·콘텐츠 / 검색 / 네비게이션 / 파일·미디어 /
-폼·입력검증 / 결제·주문 / 알림·메시지 / 관리자 / 정보표시 / 설정·환경 / 기타
+회원·인증 / 게시판·콘텐츠 / 검색·필터 / 네비게이션·메뉴 / UI·접근성 /
+결제·쇼핑 / 폼·입력검증 / 알림·고객지원 / 관리자 / 정보표시·정책 / 설정·환경 / 기타
 ```
 - 영/한 혼용 금지(한글 고정) → 분열 차단.
-- "분류 불가"는 `기타`로만 흡수(임의 신조어 금지).
+- 인증·계정·회원·로그인·프로필을 **하나의 "회원·인증"으로 통합**(사용자 핵심 불만 직격).
+- ⚠ **실측 보정**: 초안 13종 → 실제 436종 라벨을 분석해 12종으로 확정. 데이터에 큰 비중이던 UI·접근성(17.9%)을 별도 항목으로 추가.
 
-**적용 지점**:
-1. `prompts/dom_spec.md`·`tc_design.md`·`feature_consolidate.md` [System]에 목록 주입 + "이 목록 외 대분류 생성 금지" 규칙.
-2. `stage1_ingest.py`에 `_coerce_major(name) -> str` 후처리 — LLM이 목록 밖 값을 내면 동의어 매핑표로 강제 보정(`"authentication"/"user management"/"account" → "인증·계정"`).
-3. C3 dedup 키가 통제된 major 위에서 동작 → 동일 로그인이 실제로 병합됨.
+**적용 지점 (구현됨)**:
+1. `prompts/dom_spec.md`·`feature_consolidate.md` [System]에 목록 주입 + "목록 외 대분류 생성 금지". (TC_DESIGN은 leaf의 major를 복사만 하므로 미주입 — `stage2_tc_design.py:195`)
+   - dom_spec의 `"기능 적합성 기준으로 분류"` 문구가 LLM을 ISO 특성명("Functional Suitability")을 대분류로 쓰게 만든 원인 → 교정.
+2. `app/core/taxonomy.py`의 `coerce_major(name) -> (canonical, status)` — 우선순위 키워드 규칙. `_refine_leaves` dedup 키 계산 **직전**에 적용(인증 분열이 단일 major로 합쳐져야 병합 가능). consolidate(LLM) 후 `orchestrator`에서 한 번 더 sweep(LLM 생성 major 안전망).
+3. **매칭 실패 시 `기타`가 아니라 원본 유지 + 기록**(정보 손실 0). NEW run은 프롬프트 주입으로 깨끗하므로 안전망은 거의 no-op.
 
-**meta.json 기록**: `taxonomy_version`, `coerced_major_count`(보정 건수), `unknown_major_samples[]`.
+**meta.json 기록**(`refine_report` 내): `taxonomy_version`, `coerced_major`, `unknown_major_samples[]`.
 
-**검증 지표**: 대분류 distinct 개수(현재 다수 → 13 이하), 인증 도메인 단일 카테고리화 여부.
+**검증 결과 (run 89f3ba56 feature 2939개에 적용)**:
+- 대분류 distinct **436 → 39**(통제 12 + unknown 꼬리 27). 통제 어휘가 **97.7%** 흡수, unknown 2.3%.
+- 인증 도메인(User Management+Authentication+Account Management+…)이 **단일 "회원·인증"으로 통합**(leaf 194개, 7.7%).
+- ISO 특성명 오용 544개("Functional Suitability" 등) → `기타`로 정규화.
+- ⚠ rule dedup 키는 `(major, mid, leaf)`라 major만 통일돼선 깊은 로그인 병합이 안 됨(mid가 Auth/Login/로그인으로 다양) → **major 통일은 Stage 1b LLM 통합(D85)이 동일 도메인을 인식해 병합하도록 돕는 역할**. 둘은 상보적.
 
-**안전장치**: 매핑표는 보수적으로(확실한 동의어만). 매칭 실패 시 `기타`로 보내고 샘플을 로깅해 어휘 보강 근거로 사용.
+**안전장치**: 키워드 규칙은 우선순위 순(인증 최우선, "user interface"는 UI로). unknown은 원본 유지. `taxonomy.py` 단일 정의로 어휘 버전 관리.
 
 ---
 

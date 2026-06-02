@@ -83,7 +83,7 @@
 | D30 | E1~E5 (5종 강화) = AWT 핵심 기능 (외부 강화가 아닌 자체 기능) | 2026-05-19 |
 | D32 | Stage 0 (DOM → 명세 초안) = 필수 기능 | 2026-05-19 |
 | **D51** | **전역 컴포넌트 dedup** — 헤더·푸터·네비 등 ≥`GLOBAL_RATIO`(**0.4**, 실측 로그인 49.4%라 0.5면 놓쳐 보정) 페이지에 동일 셀렉터 지문으로 반복되는 요소를 `__global__`로 1회만 명세. 규칙 기반(LLM 불필요), 손실 0(이동), `dedup_global_components` 옵트아웃. 로그인 편중(인증 도메인 ~30%)의 1순위 원인 직격. **구현·검증 완료**(단위+통합 테스트). 상세: [doc/08-feature-list-refinement.md](08-feature-list-refinement.md) §3 | 2026-06-02 |
-| **D52** | **카테고리 통제 어휘(taxonomy)** — `category_major`를 고정 13종(인증·계정/회원관리/게시판·콘텐츠/검색/네비게이션/파일·미디어/폼·입력검증/결제·주문/알림·메시지/관리자/정보표시/설정·환경/기타) 중 선택 강제. `app/core/taxonomy.py` 단일 정의 + 프롬프트 주입 + `_coerce_major` 후보정. 도메인 분열(User Management/Authentication/Account Management) 제거. 상세: [doc/08-feature-list-refinement.md](08-feature-list-refinement.md) §3 | 2026-06-02 |
+| **D52** | **카테고리 통제 어휘(taxonomy)** — `category_major`를 고정 **12종**(회원·인증/게시판·콘텐츠/검색·필터/네비게이션·메뉴/UI·접근성/결제·쇼핑/폼·입력검증/알림·고객지원/관리자/정보표시·정책/설정·환경/기타) 중 선택 강제. `app/core/taxonomy.py` 단일 정의 + dom_spec·feature_consolidate 프롬프트 주입 + `coerce_major` 후보정(unknown은 원본 유지·기록, 손실 0). **구현·검증 완료**: 실측 436종→97.7% 통제 흡수, 인증 분열(User Management/Authentication/Account Management)이 단일 "회원·인증"으로 통합. major만 통일되므로 깊은 병합은 D85와 상보. 상세: [doc/08-feature-list-refinement.md](08-feature-list-refinement.md) §3 | 2026-06-02 |
 | **D53** | **기능 확정 게이트 + 도메인 TC 예산** — Stage 1b 후 Stage 2 진입 전, 도메인별 leaf/예상TC 집계 표시 + 선택적 leaf 제외·도메인 TC 예산 조절(`app/ui/feature_gate.py`). 기본 무조작 통과(회귀 없음). 예산은 D53b로 분리 가능. 상세: [doc/08-feature-list-refinement.md](08-feature-list-refinement.md) §3 | 2026-06-02 |
 
 ---
