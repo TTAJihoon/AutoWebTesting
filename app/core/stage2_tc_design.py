@@ -3,6 +3,7 @@
 v2.1 변경 (D49): negative_categories 입력 추가 — leaf 유형별 음성 카테고리 강제.
 """
 from __future__ import annotations
+from collections import OrderedDict
 from typing import Callable
 
 from app.core.stage1_ingest import excerpt_for_leaf
@@ -50,6 +51,9 @@ def _guess_feature_type(leaf_name: str) -> str:
 
 
 _CONFIDENCE_ORDER = {"HIGH": 0, "MID": 1, "INFERRED": 2, "": 3}
+
+# D54 — 그룹(페이지)당 한 번에 설계할 leaf 최대 수 (토큰 예산 보호)
+_GROUP_CAP = 12
 
 
 def _prioritize_leaves(leaves: list[dict], max_leaves: int) -> list[dict]:
@@ -126,95 +130,126 @@ def design(
     invariants = load_invariants_multi(product_type_ids)
 
     all_tcs: list[dict] = []
-    failed_leaves: list[tuple[int, str, str]] = []   # (idx, leaf명, 오류요약)
+    failed_leaves: list[tuple[int, str, str]] = []   # (leaf_num, leaf명, 오류요약)
 
-    stopped = False
-    for leaf_idx, leaf in enumerate(leaves, 1):
-        # 사용자 중단 협력 체크 (다음 leaf 시작 전)
+    # ── D54: 페이지(source_url) 단위 그룹핑 + cap 서브배치 ──────────────────
+    # leaf 1개씩이 아니라 같은 화면 기능을 묶어 TC_DESIGN_GROUP 1회 호출 →
+    # LLM이 기능 관계를 보고(중복↓·cross_feature↑) 호출 수도 급감.
+    indexed = list(enumerate(leaves, 1))            # (leaf_num, leaf) — tc_id용 안정 번호
+    groups: "OrderedDict[str, list]" = OrderedDict()
+    for leaf_num, leaf in indexed:
+        url = leaf.get("source_url") or "(미상)"
+        groups.setdefault(url, []).append((leaf_num, leaf))
+    batches: list[tuple[str, list]] = []
+    for url, members in groups.items():
+        for i in range(0, len(members), _GROUP_CAP):
+            batches.append((url, members[i:i + _GROUP_CAP]))
+
+    _cb(f"TC 설계 — 기능 {len(leaves)}개를 {len(batches)}개 그룹(페이지 단위)으로 설계")
+
+    per_leaf_seq: dict[int, int] = {}   # leaf_num -> 다음 TC 일련번호
+
+    def _finalize(tc: dict, leaf: dict, leaf_num: int) -> dict:
+        """LLM 출력 TC를 내부 스키마로 정규화 + 소속 leaf 필드 부여."""
+        if "expected_output" in tc and "expected" not in tc:
+            tc["expected"] = tc.pop("expected_output")
+        if "technique" in tc and "design_technique" not in tc:
+            tc["design_technique"] = tc.pop("technique")
+        tc.pop("leaf_index", None)
+        seq = per_leaf_seq.get(leaf_num, 0) + 1
+        per_leaf_seq[leaf_num] = seq
+        tc["tc_id"]           = f"TC-{leaf_num:03d}-{seq:03d}"
+        tc["대분류"]          = leaf.get("category_major", "")
+        tc["중분류"]          = leaf.get("category_mid", "")
+        tc["소분류"]          = leaf.get("category_leaf", "")
+        tc["requirement_id"]  = leaf.get("requirement_id", "")
+        tc["screenshot_file"] = leaf.get("screenshot_file", "")   # Stage 0 스크린샷 연결
+        tc.setdefault("review_status", "pending")
+        tc.setdefault("reviewer_note", "")
+        tc.setdefault("reviewer_id", "")
+        tc.setdefault("actual", "")
+        tc.setdefault("result", "not_executed")
+        tc.setdefault("failure_reason", "")
+        tc.setdefault("exec_confidence", 0.0)
+        tc.setdefault("failure_category", "")
+        tc.setdefault("failure_category_source", "")
+        if (tc.get("design_technique", "") or "").startswith("negative_"):
+            tc.setdefault("negative_category", "")
+        else:
+            tc.setdefault("negative_category", None)
+        return tc
+
+    for b_idx, (url, members) in enumerate(batches, 1):
+        # 사용자 중단 협력 체크 (다음 그룹 시작 전)
         if should_stop and should_stop():
-            _cb(f"⏹ 사용자 중단 — TC 설계 종료 ({leaf_idx-1}/{len(leaves)}개 처리, TC {len(all_tcs)}개)")
-            stopped = True
+            _cb(f"⏹ 사용자 중단 — TC 설계 종료 ({b_idx-1}/{len(batches)} 그룹, TC {len(all_tcs)}개)")
             break
-        leaf_num = f"{leaf_idx:03d}"
-        tc_id_start = f"TC-{leaf_num}-001"
-        excerpt = excerpt_for_leaf(manual_text, leaf)
-        feature_type = _guess_feature_type(leaf["category_leaf"])
 
-        # 자산 주입: invariants + 유사 결함
-        invariants_text = fmt_invariants(invariants, feature_type=feature_type)
-        similar_defects = search_similar_defects(product_type_ids, feature_type, top_k=3)
-        defects_text = fmt_defects(similar_defects)
+        # 그룹 공통 자산: 멤버들의 feature_type union
+        ftypes: list[str] = []
+        for _, leaf in members:
+            ft = _guess_feature_type(leaf.get("category_leaf", ""))
+            if ft not in ftypes:
+                ftypes.append(ft)
+        inv_parts, def_parts = [], []
+        for ft in ftypes:
+            t = fmt_invariants(invariants, feature_type=ft)
+            if t and t not in inv_parts:
+                inv_parts.append(t)
+            dt = fmt_defects(search_similar_defects(product_type_ids, ft, top_k=2))
+            if dt and dt not in def_parts:
+                def_parts.append(dt)
+        invariants_text = "\n".join(inv_parts)
+        defects_text    = "\n".join(def_parts)
 
-        _cb(f"TC 설계 중 ({leaf_idx}/{len(leaves)}): {leaf['category_leaf']}")
+        # 기능 목록 블록 (그룹-로컬 1-based 번호)
+        lines = []
+        for gi, (leaf_num, leaf) in enumerate(members, 1):
+            excerpt = excerpt_for_leaf(manual_text, leaf)[:400]
+            negcats = _format_negative_categories(leaf.get("category_leaf", ""))
+            lines.append(
+                f"{gi}. [{leaf.get('category_major','')} > {leaf.get('category_mid','')} > "
+                f"{leaf.get('category_leaf','')}] (req={leaf.get('requirement_id','')})\n"
+                f"   명세: {excerpt or '(없음)'}\n"
+                f"   {negcats}"
+            )
+        features_block = "\n".join(lines)
+        page_context   = f"{url}  (기능 {len(members)}개)"
 
-        # ── (B) 단일 leaf 실패 허용 — 한 leaf가 실패해도 다음 leaf로 진행 ──
+        _cb(f"TC 설계 중 (그룹 {b_idx}/{len(batches)}): {url} — 기능 {len(members)}개")
+
+        # ── 그룹 실패 허용 — 한 그룹이 실패해도 다음 그룹으로 진행 ──
         try:
-            result = llm_client.call("TC_DESIGN", {
-                "category_major": leaf["category_major"],
-                "category_mid": leaf["category_mid"],
-                "category_leaf": leaf["category_leaf"],
-                "requirement_id": leaf["requirement_id"],
-                "tc_id_start": tc_id_start,
-                "manual_excerpt": excerpt[:1500],
-                "domain_invariants": invariants_text or "(없음)",
+            result = llm_client.call("TC_DESIGN_GROUP", {
+                "page_context":         page_context,
+                "features_block":       features_block,
+                "domain_invariants":    invariants_text or "(없음)",
                 "similar_past_defects": defects_text or "(없음)",
-                "negative_categories": _format_negative_categories(leaf["category_leaf"]),
             })
         except Exception as e:
             err_msg = str(e).splitlines()[0][:200]
-            failed_leaves.append((leaf_idx, leaf["category_leaf"], err_msg))
-            if failed_leaves_out is not None:
-                failed_leaves_out.append({
-                    "idx":    leaf_idx,
-                    "name":   leaf.get("category_leaf", ""),
-                    "reason": err_msg,
-                })
-            _cb(
-                f"⚠ leaf 분석 실패 ({leaf_idx}/{len(leaves)}): "
-                f"{leaf['category_leaf']} — {err_msg}"
-            )
-            # 일일 쿼터 초과는 더 진행해도 의미 없음 — 즉시 종료(지금까지 모은 TC 보존)
+            for leaf_num, leaf in members:
+                failed_leaves.append((leaf_num, leaf.get("category_leaf", ""), err_msg))
+                if failed_leaves_out is not None:
+                    failed_leaves_out.append({
+                        "idx": leaf_num, "name": leaf.get("category_leaf", ""), "reason": err_msg,
+                    })
+            _cb(f"⚠ 그룹 분석 실패 ({b_idx}/{len(batches)}): {url} — {err_msg}")
             if "일일 쿼터" in err_msg or "PerDay" in err_msg:
-                _cb(
-                    f"⚠ 일일 쿼터 초과로 Stage 2 조기 종료 — TC {len(all_tcs)}개 / "
-                    f"leaf {leaf_idx - 1}/{len(leaves)} 처리됨"
-                )
+                _cb(f"⚠ 일일 쿼터 초과로 Stage 2 조기 종료 — TC {len(all_tcs)}개")
                 break
             continue
 
-        for tc_idx, tc in enumerate(result.get("tcs", []), 1):
-            # 프롬프트 출력 필드 → 내부 스키마 필드 정규화
-            if "expected_output" in tc and "expected" not in tc:
-                tc["expected"] = tc.pop("expected_output")
-            if "technique" in tc and "design_technique" not in tc:
-                tc["design_technique"] = tc.pop("technique")
-            # tc_id 강제 정규화 — LLM이 형식을 틀리거나 서픽스를 붙여도 덮어씀
-            # TC-{leaf_num:03d}-{tc_idx:03d} 형식 보장 (예: TC-001-003)
-            tc["tc_id"] = f"TC-{leaf_num}-{tc_idx:03d}"
-            # G1 필드 보강
-            tc["대분류"]          = leaf["category_major"]
-            tc["중분류"]          = leaf["category_mid"]
-            tc["소분류"]          = leaf["category_leaf"]
-            tc["requirement_id"]  = leaf["requirement_id"]
-            tc["screenshot_file"] = leaf.get("screenshot_file", "")  # Stage 0 스크린샷 연결
-            # G4 초기화
-            tc.setdefault("review_status", "pending")
-            tc.setdefault("reviewer_note", "")
-            tc.setdefault("reviewer_id", "")
-            # G5 초기화
-            tc.setdefault("actual", "")
-            tc.setdefault("result", "not_executed")
-            tc.setdefault("failure_reason", "")
-            tc.setdefault("exec_confidence", 0.0)
-            tc.setdefault("failure_category", "")
-            tc.setdefault("failure_category_source", "")
-            # G6 — negative_category (D49)
-            # negative_* 기법은 negative_category 필수, 그 외는 null/빈값
-            if tc.get("design_technique", "").startswith("negative_"):
-                tc.setdefault("negative_category", "")
-            else:
-                tc.setdefault("negative_category", None)
-            all_tcs.append(tc)
+        # leaf_index(그룹-로컬 1-based) → (leaf_num, leaf) 매핑
+        for tc in result.get("tcs", []):
+            try:
+                gi = int(tc.get("leaf_index", 1))
+            except (TypeError, ValueError):
+                gi = 1
+            if gi < 1 or gi > len(members):
+                gi = 1
+            leaf_num, leaf = members[gi - 1]
+            all_tcs.append(_finalize(tc, leaf, leaf_num))
 
     if failed_leaves:
         _cb(
