@@ -190,6 +190,7 @@ def main() -> None:
                 QMessageBox.critical(pv, "Stage 4 오류", traceback.format_exc()[:1200])
 
         pv.gate_review_requested.connect(_open_gate)
+        pv.clone_requested.connect(_clone_run)   # 실행 정보 → 설정 복제·재실행
         pv.show()
         return pv
 

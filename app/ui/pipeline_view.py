@@ -187,6 +187,7 @@ class PipelineView(QMainWindow):
     """파이프라인 실행 창."""
 
     gate_review_requested = Signal(list)
+    clone_requested = Signal(str)   # run_id → 설정 복제하여 재실행(main.py가 처리)
     _log_signal     = Signal(str)
     _raw_log_signal = Signal(str)   # 상세 로그(humanize 전 원본)
 
@@ -631,6 +632,17 @@ class PipelineView(QMainWindow):
         )
         self._run_btn.clicked.connect(self._start_pre_gate)
         bot_lay.addWidget(self._run_btn)
+
+        # 실행 정보 (설정·수집 요소 조회/수정)
+        self._info_btn = QPushButton("📋 실행 정보")
+        self._info_btn.setToolTip("이 실행의 설정값과 수집한 페이지 요소를 조회/수정합니다.")
+        self._info_btn.setStyleSheet(
+            "QPushButton { background-color:#475569; color:#ffffff; border:none;"
+            " border-radius:6px; padding:6px 14px; font-size:12px; font-weight:600; }"
+            "QPushButton:hover { background-color:#334155; }"
+        )
+        self._info_btn.clicked.connect(self._open_run_info)
+        bot_lay.addWidget(self._info_btn)
 
         # 기능목록 Excel 다운로드 버튼 (Stage 0 실행 후 Stage 3 완료 시 표시)
         self._feature_dl_btn = QPushButton("⬇ 기능목록 Excel")
@@ -1403,6 +1415,16 @@ class PipelineView(QMainWindow):
             )
         except Exception as e:
             QMessageBox.critical(self, "저장 실패", str(e))
+
+    # ── 실행 정보 (설정·수집 요소 조회/수정) ──────────────────────────────────
+    def _open_run_info(self) -> None:
+        try:
+            from app.ui.run_info import RunInfoDialog
+            dlg = RunInfoDialog(self._orch.run_dir, parent=self)
+            dlg.clone_requested.connect(self.clone_requested.emit)  # main.py가 마법사 prefill
+            dlg.exec()
+        except Exception as e:
+            QMessageBox.critical(self, "실행 정보 오류", str(e))
 
     # ── 로그 검색 ───────────────────────────────────────────────────────────
     def _active_log(self) -> QPlainTextEdit:
