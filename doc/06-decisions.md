@@ -89,7 +89,7 @@
 | **D55** | **LLM 호출 병렬화** — **구현 완료**: stage2 그룹·V10 보완 배치를 `ThreadPoolExecutor(RunConfig.concurrency 기본6)` 동시 실행. llm_client Lock으로 스레드 안전(provider/RPM/캐시/로그), 결과 입력순 병합→결정성 유지. `concurrency=1`이면 순차(회귀 없음). 검증: 8그룹 2.7x↑·결과 동일. (stage0/stage6 병렬화는 후속) 상세: [doc/09-tc-grouping-and-performance.md](09-tc-grouping-and-performance.md) §2 | 2026-06-02 |
 | **D56** | **V10 보완 재설계** — **구현 완료**: 신규 TC_V10_GROUP으로 gap leaf를 페이지 배치 그룹 호출(777→수십), 증식 상한 6/leaf, screenshot_file 전파(D58 누락 동시 해결). 선제 충족은 D54-A가 담당. 병렬화는 D55. D49 기준 유지. 검증: 5gap/2페이지→2호출. 상세: [doc/09-tc-grouping-and-performance.md](09-tc-grouping-and-performance.md) §2 | 2026-06-02 |
 | **D57** | **Reviewer Gate 리스크 triage** — TC를 **위험점수**(gen_confidence 주축 + source/기법/민감도 보정)로 🔴집중(<0.45)/🟢안전(≥0.75)/🟡확인 3버킷 자동 분류. **source 의존 배제** — 참고문서 없는 DOM-only도 신뢰도·기법으로 동작(실측 🔴 34%, 100% 아님). 🟢 일괄승인+🔴 집중+위험군 진행률로 "꼭 정독" 100%→~1/3. 필터·정렬·"왜 검토하나" 배지·임계값 노출. 상세: [doc/10-reviewer-gate-v2.md](10-reviewer-gate-v2.md) §3 | 2026-06-02 |
-| **D58** | **Reviewer Gate 상세 패널 강화** — `failure_detail.py`(D88) 재사용: 스크린샷 교차검색·전후이동·키보드(A/E/R/→)·결정 근거 배지(출처·신뢰도·invariant/defect). 선행 보완: V10 보완 TC에 leaf의 screenshot_file 전파(현 10%→대부분). 상세: [doc/10-reviewer-gate-v2.md](10-reviewer-gate-v2.md) §3 | 2026-06-02 |
+| **D58** | **Reviewer Gate 상세 패널 강화** — **구현 완료**: 더블클릭 팝업을 failure_detail(D88)로 교체(스크린샷 교차검색·전후이동·←→), 키보드 A/E/R 결정+자동 다음행·↑↓ 이동, run_dir 전달. screenshot_file 전파는 D56에서 완료. 상세: [doc/10-reviewer-gate-v2.md](10-reviewer-gate-v2.md) §3 | 2026-06-02 |
 
 ---
 
