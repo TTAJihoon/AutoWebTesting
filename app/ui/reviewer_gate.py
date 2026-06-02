@@ -24,6 +24,66 @@ _STATUS_COLORS = {
     "pending":  QColor("#fef9c3"),
 }
 
+# ── D57: 리스크 기반 검토 triage ────────────────────────────────────────────
+# 위험점수(risk_score) = 생성 신뢰도(주축) + 근거 출처/기법/민감도 보정.
+# source(참고문서)에만 의존하지 않으므로 DOM-only(전부 INFERRED) 시험에서도 동작.
+_RISK_RED  = 0.45   # 미만 → 집중 검토
+_RISK_GREEN = 0.75  # 이상 → 안전(일괄승인 후보)
+_BUCKET_KO = {"red": "🔴 집중 검토", "yellow": "🟡 빠른 확인", "green": "🟢 안전"}
+
+
+def _tc_source_kind(tc: dict) -> str:
+    s = str(tc.get("source_quote", "") or "").upper()
+    for p in ("MANUAL", "INVARIANT", "INFERRED"):
+        if s.startswith(p):
+            return p
+    return "INFERRED"
+
+
+def _risk_score(tc: dict) -> float:
+    try:
+        score = float(tc.get("gen_confidence", "") or 0.0)
+    except (TypeError, ValueError):
+        score = 0.0
+    kind = _tc_source_kind(tc)
+    if kind == "MANUAL":
+        score += 0.15
+    elif kind == "INVARIANT":
+        score += 0.10
+    tech = (tc.get("design_technique", "") or "")
+    if tech == "happy_path":
+        score += 0.10
+    elif tech in ("negative_deep", "cross_feature"):
+        score -= 0.05
+    if (tc.get("negative_category", "") or "") in ("injection_or_security", "permission_denied"):
+        score -= 0.05
+    return score
+
+
+def _risk_bucket(tc: dict) -> str:
+    s = _risk_score(tc)
+    if s < _RISK_RED:
+        return "red"
+    if s >= _RISK_GREEN:
+        return "green"
+    return "yellow"
+
+
+def _risk_reason(tc: dict) -> str:
+    """이 TC를 왜 (얼마나) 검토해야 하는지 한 줄 설명 — #4 막연함 해소."""
+    bucket = _risk_bucket(tc)
+    kind = _tc_source_kind(tc)
+    try:
+        conf = float(tc.get("gen_confidence", "") or 0.0)
+    except (TypeError, ValueError):
+        conf = 0.0
+    src_ko = {"MANUAL": "매뉴얼 근거", "INVARIANT": "규칙 근거", "INFERRED": "AI 추론(근거 없음)"}[kind]
+    if bucket == "red":
+        return f"집중 검토 권장 — {src_ko} · 신뢰도 {conf:.2f}. 거짓 가능성 점검 필요."
+    if bucket == "green":
+        return f"안전 — {src_ko} · 신뢰도 {conf:.2f}. 일괄 승인 후보."
+    return f"빠른 확인 — {src_ko} · 신뢰도 {conf:.2f}."
+
 # 상세 팝업에 표시할 TC 필드
 _TC_FIELDS: list[tuple[str, str]] = [
     ("tc_id",            "TC ID"),
@@ -177,6 +237,8 @@ class ReviewerGate(QDialog):
         self._llm = llm_client
         self._manual_text = manual_text
         self._regen_worker: _RegenerateWorker | None = None
+        self._bucket_filter: str | None = None      # D57 — None=전체, 'red'/'yellow'/'green'
+        self._row_to_idx: list[int] = []             # 표 행 → self._tcs 인덱스 매핑(필터 대응)
         self._decisions: dict[str, dict] = {
             tc.get("tc_id", f"__unknown_{i}__"): {
                 "status": tc.get("review_status", "pending"),
@@ -208,9 +270,39 @@ class ReviewerGate(QDialog):
         self._summary_lbl = QLabel()
         self._summary_lbl.setStyleSheet("color: #64748b; font-size: 13px;")
         top_lay.addWidget(self._summary_lbl)
+
+        # D57 — 버킷 필터 칩 (클릭 시 해당 버킷만 표시)
+        self._bucket_chips: dict[str, QPushButton] = {}
+        for key, label in [("all", "전체"), ("red", "🔴 집중"),
+                           ("yellow", "🟡 확인"), ("green", "🟢 안전")]:
+            chip = QPushButton(label)
+            chip.setCheckable(True)
+            chip.setFixedHeight(26)
+            chip.setStyleSheet(
+                "QPushButton { background:#ffffff; color:#475569; border:1px solid #e2e8f0;"
+                " border-radius:13px; padding:0 12px; font-size:11px; }"
+                "QPushButton:checked { background:#1e293b; color:#ffffff; border-color:#1e293b; }"
+            )
+            chip.clicked.connect(lambda _=False, k=key: self._set_bucket_filter(k))
+            top_lay.addWidget(chip)
+            self._bucket_chips[key] = chip
+        self._bucket_chips["all"].setChecked(True)
+
         top_lay.addStretch()
 
         # 일괄 처리 버튼
+        # D57 — 🟢 안전 일괄 승인 (검토 부담 직접 해소)
+        approve_green = QPushButton("🟢 안전 일괄 승인")
+        approve_green.setFixedHeight(32)
+        approve_green.setStyleSheet(
+            "QPushButton { background: #059669; color: #ffffff; border-radius: 6px;"
+            " padding: 0 14px; font-size: 12px; font-weight: 600; border: none; }"
+            "QPushButton:hover { background: #047857; }"
+        )
+        approve_green.setToolTip("🟢 안전 버킷(고신뢰·근거확실) TC를 일괄 승인합니다.")
+        approve_green.clicked.connect(lambda: self._approve_bucket("green"))
+        top_lay.addWidget(approve_green)
+
         approve_all = QPushButton("전체 승인")
         approve_all.setFixedHeight(32)
         approve_all.setStyleSheet(
@@ -285,18 +377,19 @@ class ReviewerGate(QDialog):
         t_hdr_lay.addStretch()
         table_card_lay.addWidget(t_hdr)
 
-        self._table = QTableWidget(0, 5)
-        self._table.setHorizontalHeaderLabels(["TC ID", "대분류", "시나리오", "기법", "상태"])
+        self._table = QTableWidget(0, 6)
+        self._table.setHorizontalHeaderLabels(["위험", "TC ID", "대분류", "시나리오", "기법", "상태"])
 
         hh = self._table.horizontalHeader()
         hh.setSectionResizeMode(QHeaderView.Interactive)   # 드래그로 너비 조절 가능
         hh.setStretchLastSection(False)
         # 초기 컬럼 너비
-        self._table.setColumnWidth(0, 100)   # TC ID
-        self._table.setColumnWidth(1, 110)   # 대분류
-        self._table.setColumnWidth(2, 360)   # 시나리오 (가장 넓게)
-        self._table.setColumnWidth(3, 130)   # 기법
-        self._table.setColumnWidth(4, 75)    # 상태
+        self._table.setColumnWidth(0, 90)    # 위험(버킷)
+        self._table.setColumnWidth(1, 100)   # TC ID
+        self._table.setColumnWidth(2, 110)   # 대분류
+        self._table.setColumnWidth(3, 320)   # 시나리오 (가장 넓게)
+        self._table.setColumnWidth(4, 120)   # 기법
+        self._table.setColumnWidth(5, 75)    # 상태
 
         self._table.verticalHeader().setVisible(False)
         self._table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -434,12 +527,20 @@ class ReviewerGate(QDialog):
     # ── 데이터 로딩 ──────────────────────────────────────────────────────
     def _load_tcs(self) -> None:
         self._table.setRowCount(0)
+        self._row_to_idx = []
+        bucket_short = {"red": "🔴", "yellow": "🟡", "green": "🟢"}
         for i, tc in enumerate(self._tcs):
+            bucket = _risk_bucket(tc)
+            # D57 — 버킷 필터: 선택된 버킷만 표시(None=전체)
+            if self._bucket_filter and bucket != self._bucket_filter:
+                continue
             r = self._table.rowCount()
             self._table.insertRow(r)
+            self._row_to_idx.append(i)
             tc_id = tc.get("tc_id", f"__unknown_{i}__")
             status = self._decisions.get(tc_id, {}).get("status", "pending")
             items = [
+                QTableWidgetItem(bucket_short.get(bucket, "")),
                 QTableWidgetItem(tc_id),
                 QTableWidgetItem(tc.get("대분류", "")),
                 QTableWidgetItem(tc.get("scenario", "")),     # 잘림 없이 전체 저장
@@ -453,21 +554,28 @@ class ReviewerGate(QDialog):
                 self._table.setItem(r, col, item)
         self._update_summary()
 
+    def _tc_at(self, row: int) -> dict | None:
+        """표 행 → 실제 TC(필터/매핑 반영)."""
+        if 0 <= row < len(self._row_to_idx):
+            return self._tcs[self._row_to_idx[row]]
+        return None
+
     # ── 이벤트 핸들러 ────────────────────────────────────────────────────
     def _on_row_changed(self, row: int) -> None:
         """테이블 선택 행 변경 시 상세 패널 갱신."""
-        if row < 0 or row >= len(self._tcs):
+        tc = self._tc_at(row)
+        if tc is None:
             return
-        tc = self._tcs[row]
         tc_id = tc.get("tc_id", f"__unknown_{row}__")
         dec = self._decisions.get(tc_id, {"status": "pending", "note": ""})
 
-        lines = []
+        # D57 — "왜 검토하나" 한 줄(막연함 해소) + 필드 상세
+        lines = [f"[검토 안내] {_risk_reason(tc)}", ""]
         for key, label in _TC_FIELDS:
             val = tc.get(key, "")
             if val:
                 lines.append(f"[{label}]\n{val}")
-        self._detail_text.setPlainText("\n\n".join(lines))
+        self._detail_text.setPlainText("\n".join(lines))
 
         # 콤보 인덱스 설정 (blockSignals로 _on_status_changed 억제)
         status = dec.get("status", "pending")
@@ -482,33 +590,37 @@ class ReviewerGate(QDialog):
 
     def _on_double_click(self, row: int, _col: int) -> None:
         """더블클릭 → TC 전체 내용 팝업."""
-        if row < 0 or row >= len(self._tcs):
+        tc = self._tc_at(row)
+        if tc is None:
             return
-        dlg = _TcDetailDialog(self._tcs[row], parent=self)
+        dlg = _TcDetailDialog(tc, parent=self)
         dlg.exec()
 
     def _on_status_changed(self, index: int) -> None:
         row = self._table.currentRow()
-        if row < 0 or index < 0 or index >= len(_STATUS_OPTIONS):
+        tc = self._tc_at(row)
+        if tc is None or index < 0 or index >= len(_STATUS_OPTIONS):
             return
-        tc_id = self._tcs[row].get("tc_id", f"__unknown_{row}__")
+        tc_id = tc.get("tc_id", f"__unknown_{row}__")
         if tc_id in self._decisions:
             self._decisions[tc_id]["status"] = _STATUS_OPTIONS[index]
 
     def _on_note_changed(self) -> None:
         row = self._table.currentRow()
-        if row < 0:
+        tc = self._tc_at(row)
+        if tc is None:
             return
-        tc_id = self._tcs[row].get("tc_id", f"__unknown_{row}__")
+        tc_id = tc.get("tc_id", f"__unknown_{row}__")
         if tc_id in self._decisions:
             self._decisions[tc_id]["note"] = self._note_edit.toPlainText()
 
     def _apply_current(self) -> None:
         """상세 패널의 결정을 테이블 행에 반영."""
         row = self._table.currentRow()
-        if row < 0:
+        tc = self._tc_at(row)
+        if tc is None:
             return
-        tc_id = self._tcs[row].get("tc_id", f"__unknown_{row}__")
+        tc_id = tc.get("tc_id", f"__unknown_{row}__")
         dec = self._decisions.get(tc_id, {"status": "pending"})
         status = dec["status"]
         bg = _STATUS_COLORS.get(status, QColor("#ffffff"))
@@ -516,7 +628,7 @@ class ReviewerGate(QDialog):
             item = self._table.item(row, col)
             if item:
                 item.setBackground(bg)
-        status_item = self._table.item(row, 4)
+        status_item = self._table.item(row, 5)
         if status_item:
             status_item.setText(_STATUS_KO.get(status, status))
         self._update_summary()
@@ -525,24 +637,53 @@ class ReviewerGate(QDialog):
         """모든 TC 상태 일괄 변경."""
         for tc_id in self._decisions:
             self._decisions[tc_id]["status"] = status
-        bg = _STATUS_COLORS.get(status, QColor("#ffffff"))
-        for r in range(self._table.rowCount()):
-            for c in range(self._table.columnCount()):
-                item = self._table.item(r, c)
-                if item:
-                    item.setBackground(bg)
-            status_item = self._table.item(r, 4)
-            if status_item:
-                status_item.setText(_STATUS_KO.get(status, status))
-        self._update_summary()
+        self._load_tcs()   # 표 다시 그려 상태/색 일괄 반영(필터 유지)
+
+    # ── D57: 버킷 필터 + 버킷 일괄 승인 ──────────────────────────────────────
+    def _set_bucket_filter(self, key: str) -> None:
+        self._bucket_filter = None if key == "all" else key
+        for k, chip in self._bucket_chips.items():
+            chip.setChecked(k == key)
+        self._load_tcs()
+
+    def _approve_bucket(self, bucket: str) -> None:
+        """특정 버킷(예: green)의 TC를 일괄 승인."""
+        n = 0
+        for i, tc in enumerate(self._tcs):
+            if _risk_bucket(tc) == bucket:
+                tc_id = tc.get("tc_id", f"__unknown_{i}__")
+                if tc_id in self._decisions:
+                    self._decisions[tc_id]["status"] = "approved"
+                    n += 1
+        QMessageBox.information(
+            self, "일괄 승인",
+            f"{_BUCKET_KO.get(bucket, bucket)} 버킷 {n}개 TC를 승인했습니다."
+        )
+        self._load_tcs()
 
     def _update_summary(self) -> None:
         counts: dict[str, int] = {"approved": 0, "edited": 0, "rejected": 0, "pending": 0}
         for d in self._decisions.values():
             s = d.get("status", "pending")
             counts[s] = counts.get(s, 0) + 1
+
+        # D57 — 버킷 분포 + 위험군(🔴) 검토 진행률(끝이 보이는 효과)
+        bucket_n = {"red": 0, "yellow": 0, "green": 0}
+        red_done = 0
+        for i, tc in enumerate(self._tcs):
+            b = _risk_bucket(tc)
+            bucket_n[b] = bucket_n.get(b, 0) + 1
+            if b == "red":
+                st = self._decisions.get(tc.get("tc_id", f"__unknown_{i}__"), {}).get("status", "pending")
+                if st != "pending":
+                    red_done += 1
+        # 칩 라벨에 건수 반영
+        self._bucket_chips["red"].setText(f"🔴 집중 {bucket_n['red']}")
+        self._bucket_chips["yellow"].setText(f"🟡 확인 {bucket_n['yellow']}")
+        self._bucket_chips["green"].setText(f"🟢 안전 {bucket_n['green']}")
+
         self._summary_lbl.setText(
-            f"총 {len(self._tcs)}건  |  "
+            f"총 {len(self._tcs)}건  |  🔴 집중검토 {red_done}/{bucket_n['red']} 완료  |  "
             f"승인 {counts['approved']}  수정 {counts['edited']}  "
             f"거부 {counts['rejected']}  검토 전 {counts['pending']}"
         )
