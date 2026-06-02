@@ -193,13 +193,16 @@ def _add_v10_tcs(
     기존 TC와 ID 충돌 방지를 위해 leaf별 최대 번호 + 1로 시작.
     """
     # lazy imports — stage2 유틸 재사용, 순환 의존 방지
+    from collections import OrderedDict
     from app.core.stage1_ingest import excerpt_for_leaf
     from app.assets.invariants_loader import load_invariants_multi, format_for_llm as fmt_inv
     from app.assets.defect_catalog import search_similar_defects, format_for_llm as fmt_def
     from app.assets.product_types import classify_product_types
     from app.core.stage2_tc_design import (
-        _CATEGORY_DESCRIPTIONS, _guess_feature_type,
+        _CATEGORY_DESCRIPTIONS, _guess_feature_type, _GROUP_CAP,
     )
+
+    _V10_CAP_PER_LEAF = 6   # D56 — leaf당 V10 보완 TC 상한(과증식 억제)
 
     leaf_by_rid = {lf["requirement_id"]: lf for lf in leaves}
     leaf_to_idx = {lf["requirement_id"]: i + 1 for i, lf in enumerate(leaves)}
@@ -216,96 +219,110 @@ def _add_v10_tcs(
     product_type_ids = classify_product_types(manual_text)
     inv_map = load_invariants_multi(product_type_ids)
 
-    new_tcs: list[dict] = []
+    # ── D56: gap leaf를 source_url(페이지)+cap로 그룹핑 → 그룹당 1회 호출 ──────
+    items = []   # (leaf_num, rid, leaf, missing)
     for gap in v10_gaps:
         rid     = gap.get("leaf_rid", "")
         missing = gap.get("missing_categories", [])
         leaf    = leaf_by_rid.get(rid)
         if not leaf or not missing:
-            _cb(f"  V10 gap skip (leaf 없음): rid={rid}")
             continue
+        items.append((leaf_to_idx.get(rid, 1), rid, leaf, missing))
 
-        leaf_idx  = leaf_to_idx.get(rid, 1)
-        leaf_num  = f"{leaf_idx:03d}"
-        next_num  = existing_max.get(rid, 0) + 1
-        tc_id_start = f"TC-{leaf_num}-{next_num:03d}"
+    groups: "OrderedDict[str, list]" = OrderedDict()
+    for it in items:
+        url = it[2].get("source_url") or "(미상)"
+        groups.setdefault(url, []).append(it)
+    batches: list[list] = []
+    for url, members in groups.items():
+        for i in range(0, len(members), _GROUP_CAP):
+            batches.append(members[i:i + _GROUP_CAP])
 
-        missing_desc = "\n".join(
-            f"- {c}: {_CATEGORY_DESCRIPTIONS.get(c, '')}" for c in missing
-        )
-        cats_text = (
-            f"V10 커버리지 보완 — 아래 카테고리 각 ≥ 1 TC를 추가 생성해야 함:\n"
-            f"{missing_desc}"
-        )
+    new_tcs: list[dict] = []
+    for b_idx, members in enumerate(batches, 1):
+        # 그룹 공통 자산
+        ftypes: list[str] = []
+        for _, _, leaf, _ in members:
+            ft = _guess_feature_type(leaf.get("category_leaf", ""))
+            if ft not in ftypes:
+                ftypes.append(ft)
+        inv_parts, def_parts = [], []
+        for ft in ftypes:
+            t = fmt_inv(inv_map, feature_type=ft)
+            if t and t not in inv_parts:
+                inv_parts.append(t)
+            dt = fmt_def(search_similar_defects(product_type_ids, ft, top_k=2))
+            if dt and dt not in def_parts:
+                def_parts.append(dt)
+        invariants_text = "\n".join(inv_parts)
+        defects_text    = "\n".join(def_parts)
 
-        feature_type    = _guess_feature_type(leaf["category_leaf"])
-        invariants_text = fmt_inv(inv_map, feature_type=feature_type)
-        similar_defects = search_similar_defects(product_type_ids, feature_type, top_k=2)
-        defects_text    = fmt_def(similar_defects)
-        excerpt         = excerpt_for_leaf(manual_text, leaf)
+        lines = []
+        for gi, (leaf_num, rid, leaf, missing) in enumerate(members, 1):
+            excerpt = excerpt_for_leaf(manual_text, leaf)[:300]
+            missing_desc = "; ".join(
+                f"{c}({_CATEGORY_DESCRIPTIONS.get(c, '')})" for c in missing
+            )
+            lines.append(
+                f"{gi}. [{leaf.get('category_major','')} > {leaf.get('category_mid','')} > "
+                f"{leaf.get('category_leaf','')}]\n"
+                f"   명세: {excerpt or '(없음)'}\n"
+                f"   누락 음성 카테고리(각 ≥1 TC): {missing_desc}"
+            )
+        features_block = "\n".join(lines)
 
-        _cb(f"  V10 보완 TC 생성: {leaf['category_leaf']} 누락={missing}")
-        # 복원력: V10 보완은 커버리지 향상용이므로 한 leaf 실패해도 다음 leaf로 진행
+        _cb(f"  V10 보완 (그룹 {b_idx}/{len(batches)}): {len(members)}개 기능")
+        # 복원력: 그룹 실패해도 다음 그룹으로 진행
         try:
-            result = llm_client.call("TC_DESIGN", {
-                "category_major": leaf["category_major"],
-                "category_mid":   leaf["category_mid"],
-                "category_leaf":  leaf["category_leaf"],
-                "requirement_id": rid,
-                "tc_id_start":    tc_id_start,
-                "manual_excerpt": excerpt[:1500],
+            result = llm_client.call("TC_V10_GROUP", {
+                "features_block":       features_block,
                 "domain_invariants":    invariants_text or "(없음)",
                 "similar_past_defects": defects_text or "(없음)",
-                "negative_categories":  cats_text,
             })
         except Exception as e:
-            err_msg = str(e).splitlines()[0][:150]
-            _cb(f"  ⚠ V10 보완 실패 (leaf={leaf['category_leaf']}): {err_msg} — 건너뜀")
+            _cb(f"  ⚠ V10 보완 그룹 실패(건너뜀): {str(e).splitlines()[0][:150]}")
             continue
 
-        result_tcs = result.get("tcs", [])
+        per_leaf_added: dict[str, int] = {}
+        for tc in result.get("tcs", []):
+            try:
+                gi = int(tc.get("leaf_index", 1))
+            except (TypeError, ValueError):
+                gi = 1
+            if gi < 1 or gi > len(members):
+                gi = 1
+            leaf_num, rid, leaf, missing = members[gi - 1]
+            if per_leaf_added.get(rid, 0) >= _V10_CAP_PER_LEAF:
+                continue   # 증식 상한
 
-        # TC ID 정규화 — LLM이 4단계 ID(TC-003-006-01)를 생성하면 TC-003-006 형식으로 교정
-        for tc in result_tcs:
-            raw_id = tc.get("tc_id", "")
-            if not re.match(r"^TC-\d{3}-\d{3}$", raw_id):
-                fixed = f"TC-{leaf_num}-{next_num:03d}"
-                tc["tc_id"] = fixed
-                next_num += 1
-
-        for tc in result_tcs:
-            # 출력 필드 정규화
             if "expected_output" in tc and "expected" not in tc:
                 tc["expected"] = tc.pop("expected_output")
             if "technique" in tc and "design_technique" not in tc:
                 tc["design_technique"] = tc.pop("technique")
-            # G1
-            tc["대분류"]        = leaf["category_major"]
-            tc["중분류"]        = leaf["category_mid"]
-            tc["소분류"]        = leaf["category_leaf"]
-            tc["requirement_id"] = rid
-            # G4
+            tc.pop("leaf_index", None)
+            next_num = existing_max.get(rid, 0) + 1
+            existing_max[rid] = next_num
+            tc["tc_id"]           = f"TC-{leaf_num:03d}-{next_num:03d}"
+            tc["대분류"]          = leaf["category_major"]
+            tc["중분류"]          = leaf["category_mid"]
+            tc["소분류"]          = leaf["category_leaf"]
+            tc["requirement_id"]  = rid
+            tc["screenshot_file"] = leaf.get("screenshot_file", "")   # D58 — 스크린샷 전파
             tc.setdefault("review_status", "pending")
             tc.setdefault("reviewer_note", "")
             tc.setdefault("reviewer_id",  "")
-            # G5
             tc.setdefault("actual", "")
             tc.setdefault("result", "not_executed")
             tc.setdefault("failure_reason", "")
             tc.setdefault("exec_confidence", 0.0)
             tc.setdefault("failure_category", "")
             tc.setdefault("failure_category_source", "")
-            # G6
-            if tc.get("design_technique", "").startswith("negative_"):
+            if (tc.get("design_technique", "") or "").startswith("negative_"):
                 tc.setdefault("negative_category", "")
             else:
                 tc.setdefault("negative_category", None)
             new_tcs.append(tc)
-
-            # 최대 번호 갱신 (다음 gap 처리 시 충돌 방지)
-            m = re.match(r"TC-\d{3}-(\d{3})$", tc.get("tc_id", ""))
-            if m:
-                existing_max[rid] = max(existing_max.get(rid, 0), int(m.group(1)))
+            per_leaf_added[rid] = per_leaf_added.get(rid, 0) + 1
 
     return new_tcs
 
