@@ -3,6 +3,7 @@
 v2.1 변경 (D49): negative_categories 입력 추가 — leaf 유형별 음성 카테고리 강제.
 """
 from __future__ import annotations
+import concurrent.futures as _cf
 from collections import OrderedDict
 from typing import Callable
 
@@ -159,6 +160,7 @@ def design(
     failed_leaves_out: list[dict] | None = None,    # 추적성용: 실패한 leaf 정보 기록처
     excluded_leaves_out: list[dict] | None = None,  # 추적성용: max_leaves cap으로 제외된 leaf
     should_stop: Callable[[], bool] | None = None,  # 사용자 중단 신호 (협력적)
+    concurrency: int = 1,                            # 동시 그룹 호출 수 (D55)
 ) -> list[dict]:
     """모든 leaf에 대해 TC를 생성해 단일 리스트로 반환.
 
@@ -225,17 +227,16 @@ def design(
 
     _cb(f"TC 설계 — 기능 {len(leaves)}개를 {len(batches)}개 그룹(페이지 단위)으로 설계")
 
-    per_leaf_seq: dict[int, int] = {}   # leaf_num -> 다음 TC 일련번호
-
-    def _finalize(tc: dict, leaf: dict, leaf_num: int) -> dict:
-        """LLM 출력 TC를 내부 스키마로 정규화 + 소속 leaf 필드 부여."""
+    def _finalize(tc: dict, leaf: dict, leaf_num: int, seq_map: dict) -> dict:
+        """LLM 출력 TC를 내부 스키마로 정규화 + 소속 leaf 필드 부여.
+        seq_map은 배치-로컬(각 leaf는 한 배치에만 속하므로 동시성 안전)."""
         if "expected_output" in tc and "expected" not in tc:
             tc["expected"] = tc.pop("expected_output")
         if "technique" in tc and "design_technique" not in tc:
             tc["design_technique"] = tc.pop("technique")
         tc.pop("leaf_index", None)
-        seq = per_leaf_seq.get(leaf_num, 0) + 1
-        per_leaf_seq[leaf_num] = seq
+        seq = seq_map.get(leaf_num, 0) + 1
+        seq_map[leaf_num] = seq
         tc["tc_id"]           = f"TC-{leaf_num:03d}-{seq:03d}"
         tc["대분류"]          = leaf.get("category_major", "")
         tc["중분류"]          = leaf.get("category_mid", "")
@@ -257,13 +258,8 @@ def design(
             tc.setdefault("negative_category", None)
         return tc
 
-    for b_idx, (url, members) in enumerate(batches, 1):
-        # 사용자 중단 협력 체크 (다음 그룹 시작 전)
-        if should_stop and should_stop():
-            _cb(f"⏹ 사용자 중단 — TC 설계 종료 ({b_idx-1}/{len(batches)} 그룹, TC {len(all_tcs)}개)")
-            break
-
-        # 그룹 공통 자산: 멤버들의 feature_type union
+    def _process_batch(b_idx: int, url: str, members: list) -> dict:
+        """한 그룹(페이지)을 설계 → {tcs, failed, quota}. 스레드에서 실행 가능."""
         ftypes: list[str] = []
         for _, leaf in members:
             ft = _guess_feature_type(leaf.get("category_leaf", ""))
@@ -277,10 +273,6 @@ def design(
             dt = fmt_defects(search_similar_defects(product_type_ids, ft, top_k=2))
             if dt and dt not in def_parts:
                 def_parts.append(dt)
-        invariants_text = "\n".join(inv_parts)
-        defects_text    = "\n".join(def_parts)
-
-        # 기능 목록 블록 (그룹-로컬 1-based 번호)
         lines = []
         for gi, (leaf_num, leaf) in enumerate(members, 1):
             excerpt = excerpt_for_leaf(manual_text, leaf)[:400]
@@ -291,34 +283,25 @@ def design(
                 f"   명세: {excerpt or '(없음)'}\n"
                 f"   {negcats}"
             )
-        features_block = "\n".join(lines)
-        page_context   = f"{url}  (기능 {len(members)}개)"
-
         _cb(f"TC 설계 중 (그룹 {b_idx}/{len(batches)}): {url} — 기능 {len(members)}개")
 
-        # ── 그룹 실패 허용 — 한 그룹이 실패해도 다음 그룹으로 진행 ──
         try:
             result = llm_client.call("TC_DESIGN_GROUP", {
-                "page_context":         page_context,
-                "features_block":       features_block,
-                "domain_invariants":    invariants_text or "(없음)",
-                "similar_past_defects": defects_text or "(없음)",
+                "page_context":         f"{url}  (기능 {len(members)}개)",
+                "features_block":       "\n".join(lines),
+                "domain_invariants":    "\n".join(inv_parts) or "(없음)",
+                "similar_past_defects": "\n".join(def_parts) or "(없음)",
             })
         except Exception as e:
             err_msg = str(e).splitlines()[0][:200]
-            for leaf_num, leaf in members:
-                failed_leaves.append((leaf_num, leaf.get("category_leaf", ""), err_msg))
-                if failed_leaves_out is not None:
-                    failed_leaves_out.append({
-                        "idx": leaf_num, "name": leaf.get("category_leaf", ""), "reason": err_msg,
-                    })
+            failed = [{"idx": ln, "name": lf.get("category_leaf", ""), "reason": err_msg}
+                      for ln, lf in members]
             _cb(f"⚠ 그룹 분석 실패 ({b_idx}/{len(batches)}): {url} — {err_msg}")
-            if "일일 쿼터" in err_msg or "PerDay" in err_msg:
-                _cb(f"⚠ 일일 쿼터 초과로 Stage 2 조기 종료 — TC {len(all_tcs)}개")
-                break
-            continue
+            return {"tcs": [], "failed": failed,
+                    "quota": ("일일 쿼터" in err_msg or "PerDay" in err_msg)}
 
-        # leaf_index(그룹-로컬 1-based) → (leaf_num, leaf) 매핑
+        seq_map: dict[int, int] = {}
+        out = []
         for tc in result.get("tcs", []):
             try:
                 gi = int(tc.get("leaf_index", 1))
@@ -327,7 +310,43 @@ def design(
             if gi < 1 or gi > len(members):
                 gi = 1
             leaf_num, leaf = members[gi - 1]
-            all_tcs.append(_finalize(tc, leaf, leaf_num))
+            out.append(_finalize(tc, leaf, leaf_num, seq_map))
+        return {"tcs": out, "failed": [], "quota": False}
+
+    # ── D55: 그룹 단위 병렬/순차 실행 (입력 순서로 병합 → 결정성 유지) ──────
+    def _merge(res: dict):
+        all_tcs.extend(res["tcs"])
+        for f in res["failed"]:
+            failed_leaves.append((f["idx"], f["name"], f["reason"]))
+            if failed_leaves_out is not None:
+                failed_leaves_out.append(f)
+
+    if concurrency <= 1 or len(batches) <= 1:
+        for b_idx, (url, members) in enumerate(batches, 1):
+            if should_stop and should_stop():
+                _cb(f"⏹ 사용자 중단 — TC 설계 종료 ({b_idx-1}/{len(batches)} 그룹)")
+                break
+            res = _process_batch(b_idx, url, members)
+            _merge(res)
+            if res["quota"]:
+                _cb(f"⚠ 일일 쿼터 초과로 Stage 2 조기 종료 — TC {len(all_tcs)}개")
+                break
+    else:
+        with _cf.ThreadPoolExecutor(max_workers=concurrency) as ex:
+            futs = {
+                ex.submit(_process_batch, b_idx, url, members): b_idx
+                for b_idx, (url, members) in enumerate(batches, 1)
+            }
+            results: dict[int, dict] = {}
+            for fut in _cf.as_completed(futs):
+                if should_stop and should_stop():
+                    for f in futs:
+                        f.cancel()
+                    break
+                results[futs[fut]] = fut.result()
+            # 입력(그룹) 순서로 병합 — tc_id·출력 재현성 보장
+            for b_idx in sorted(results):
+                _merge(results[b_idx])
 
     # ── D54-B: 교차 페이지 시나리오(cross_feature) 패스 ─────────────────────
     if leaves and not (should_stop and should_stop()):

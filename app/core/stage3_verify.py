@@ -42,6 +42,7 @@ def verify(
     max_retries: int = 3,
     inferred_threshold: float = INFERRED_THRESHOLD,
     progress_cb: Callable[[str], None] | None = None,
+    concurrency: int = 1,
 ) -> list[dict]:
     """V1~V5 검증. 실패 TC는 재호출(최대 max_retries회). 최종 TC 목록 반환."""
     def _cb(msg: str):
@@ -59,7 +60,7 @@ def verify(
             # 구조적 오류 없음 — V10 gap만 남은 경우 TC 추가 후 완료
             if v10_gaps:
                 _cb(f"  V10 커버리지 부족 {len(v10_gaps)}개 leaf - 누락 카테고리 TC 추가 생성")
-                new_tcs = _add_v10_tcs(v10_gaps, leaves, manual_text, tcs, llm_client, _cb)
+                new_tcs = _add_v10_tcs(v10_gaps, leaves, manual_text, tcs, llm_client, _cb, concurrency)
                 tcs.extend(new_tcs)
             _cb(f"Stage 3 완료 (시도 {attempt}회) - 모든 검증 통과")
             return tcs
@@ -162,7 +163,7 @@ def verify(
     # V10 gap이 남아 있어도 마지막으로 한 번 TC 추가 시도
     if v10_remain:
         _cb(f"  V10 gap {len(v10_remain)}개 leaf - 최후 TC 추가 시도")
-        new_tcs = _add_v10_tcs(v10_remain, leaves, manual_text, tcs, llm_client, _cb)
+        new_tcs = _add_v10_tcs(v10_remain, leaves, manual_text, tcs, llm_client, _cb, concurrency)
         tcs.extend(new_tcs)
 
     return tcs
@@ -186,6 +187,7 @@ def _add_v10_tcs(
     existing_tcs: list[dict],
     llm_client,
     _cb,
+    concurrency: int = 1,
 ) -> list[dict]:
     """V10 커버리지 부족 leaf에 누락 카테고리 TC를 추가 생성.
 
@@ -193,6 +195,7 @@ def _add_v10_tcs(
     기존 TC와 ID 충돌 방지를 위해 leaf별 최대 번호 + 1로 시작.
     """
     # lazy imports — stage2 유틸 재사용, 순환 의존 방지
+    import concurrent.futures as _cf
     from collections import OrderedDict
     from app.core.stage1_ingest import excerpt_for_leaf
     from app.assets.invariants_loader import load_invariants_multi, format_for_llm as fmt_inv
@@ -238,9 +241,9 @@ def _add_v10_tcs(
         for i in range(0, len(members), _GROUP_CAP):
             batches.append(members[i:i + _GROUP_CAP])
 
-    new_tcs: list[dict] = []
-    for b_idx, members in enumerate(batches, 1):
-        # 그룹 공통 자산
+    def _process_v10_batch(b_idx: int, members: list) -> list[dict]:
+        """한 그룹의 V10 보완 TC 생성 → 리스트 반환. 스레드에서 실행 가능.
+        각 rid(leaf)는 한 배치에만 속하므로 tc_id 번호는 배치-로컬로 안전."""
         ftypes: list[str] = []
         for _, _, leaf, _ in members:
             ft = _guess_feature_type(leaf.get("category_leaf", ""))
@@ -254,9 +257,6 @@ def _add_v10_tcs(
             dt = fmt_def(search_similar_defects(product_type_ids, ft, top_k=2))
             if dt and dt not in def_parts:
                 def_parts.append(dt)
-        invariants_text = "\n".join(inv_parts)
-        defects_text    = "\n".join(def_parts)
-
         lines = []
         for gi, (leaf_num, rid, leaf, missing) in enumerate(members, 1):
             excerpt = excerpt_for_leaf(manual_text, leaf)[:300]
@@ -269,21 +269,20 @@ def _add_v10_tcs(
                 f"   명세: {excerpt or '(없음)'}\n"
                 f"   누락 음성 카테고리(각 ≥1 TC): {missing_desc}"
             )
-        features_block = "\n".join(lines)
-
         _cb(f"  V10 보완 (그룹 {b_idx}/{len(batches)}): {len(members)}개 기능")
-        # 복원력: 그룹 실패해도 다음 그룹으로 진행
         try:
             result = llm_client.call("TC_V10_GROUP", {
-                "features_block":       features_block,
-                "domain_invariants":    invariants_text or "(없음)",
-                "similar_past_defects": defects_text or "(없음)",
+                "features_block":       "\n".join(lines),
+                "domain_invariants":    "\n".join(inv_parts) or "(없음)",
+                "similar_past_defects": "\n".join(def_parts) or "(없음)",
             })
         except Exception as e:
             _cb(f"  ⚠ V10 보완 그룹 실패(건너뜀): {str(e).splitlines()[0][:150]}")
-            continue
+            return []
 
+        out: list[dict] = []
         per_leaf_added: dict[str, int] = {}
+        local_seq: dict[str, int] = {}
         for tc in result.get("tcs", []):
             try:
                 gi = int(tc.get("leaf_index", 1))
@@ -300,8 +299,8 @@ def _add_v10_tcs(
             if "technique" in tc and "design_technique" not in tc:
                 tc["design_technique"] = tc.pop("technique")
             tc.pop("leaf_index", None)
-            next_num = existing_max.get(rid, 0) + 1
-            existing_max[rid] = next_num
+            local_seq[rid] = local_seq.get(rid, 0) + 1
+            next_num = existing_max.get(rid, 0) + local_seq[rid]   # 초기 base + 배치 로컬 증가
             tc["tc_id"]           = f"TC-{leaf_num:03d}-{next_num:03d}"
             tc["대분류"]          = leaf["category_major"]
             tc["중분류"]          = leaf["category_mid"]
@@ -321,8 +320,24 @@ def _add_v10_tcs(
                 tc.setdefault("negative_category", "")
             else:
                 tc.setdefault("negative_category", None)
-            new_tcs.append(tc)
+            out.append(tc)
             per_leaf_added[rid] = per_leaf_added.get(rid, 0) + 1
+        return out
+
+    # ── D55: V10 보완 그룹 병렬/순차 실행 (입력 순서로 병합) ──────────────────
+    new_tcs: list[dict] = []
+    if concurrency <= 1 or len(batches) <= 1:
+        for b_idx, members in enumerate(batches, 1):
+            new_tcs.extend(_process_v10_batch(b_idx, members))
+    else:
+        with _cf.ThreadPoolExecutor(max_workers=concurrency) as ex:
+            futs = {ex.submit(_process_v10_batch, b_idx, members): b_idx
+                    for b_idx, members in enumerate(batches, 1)}
+            results: dict[int, list] = {}
+            for fut in _cf.as_completed(futs):
+                results[futs[fut]] = fut.result()
+            for b_idx in sorted(results):
+                new_tcs.extend(results[b_idx])
 
     return new_tcs
 

@@ -79,6 +79,11 @@ class RunConfig:
     True면 사용자가 도메인별 집계를 보고 불필요한 기능(leaf)을 제외 가능.
     False(기본)면 게이트 없이 전체 기능으로 바로 TC 설계(기존 동작)."""
 
+    concurrency: int = 6
+    """동시 LLM 호출 수(D55). Stage 2 그룹 설계·V10 보완 배치를 동시 실행.
+    1이면 순차(기존 동작). 상용(Claude/OpenAI)은 RPM 제한 없어 병렬 효과 큼.
+    Gemini 등 RPM 제한 모델은 내부적으로 간격 직렬화됨."""
+
 
 class Orchestrator:
     """AWT Stage 0~7 실행 제어."""
@@ -251,6 +256,7 @@ class Orchestrator:
             failed_leaves_out=self.stage2_failed_leaves,
             excluded_leaves_out=self.stage2_excluded_leaves,
             should_stop=self.is_stopped,
+            concurrency=self.config.concurrency,
         )
         self._save_intermediate("tc_raw")
         self._stage = 2
@@ -281,6 +287,7 @@ class Orchestrator:
             leaves=self.ingest_result["leaves"],
             inferred_threshold=self.config.inferred_threshold,
             progress_cb=self._cb,
+            concurrency=self.config.concurrency,
         )
         self._save_intermediate("tc_verified")
         # Reviewer Gate용 Excel 생성 (TC 있을 때만)

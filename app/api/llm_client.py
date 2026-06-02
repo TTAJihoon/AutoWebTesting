@@ -10,6 +10,7 @@
 from __future__ import annotations
 import json
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -82,13 +83,17 @@ class LLMClient:
         self._providers: dict[str, LLMProvider] = {}
         # RPM 제어 — 마지막 실제 API 호출 시각
         self._last_call_time: float = 0.0
+        # 동시성(D55) — 공유 상태(provider 캐시·RPM·캐시·로그) 보호
+        self._lock = threading.Lock()
+        self._log_seq = 0
 
     def _get_provider(self, model: str) -> LLMProvider:
         name = self._provider_override or provider_name_for_model(model)
-        if name not in self._providers:
-            key = self._key_for_provider(name)
-            self._providers[name] = resolve_provider(model, key)
-        return self._providers[name]
+        with self._lock:
+            if name not in self._providers:
+                key = self._key_for_provider(name)
+                self._providers[name] = resolve_provider(model, key)
+            return self._providers[name]
 
     def _key_for_provider(self, provider_name: str) -> str:
         """모델이 가리키는 provider에 '맞는' API 키를 반환.
@@ -133,7 +138,8 @@ class LLMClient:
         cache_inputs = dict(inputs)
         cache_inputs["__model__"] = effective_model
         if use_cache:
-            cached = cache_store.get(contract_id, contract.version, cache_inputs)
+            with self._lock:
+                cached = cache_store.get(contract_id, contract.version, cache_inputs)
             if cached is not None:
                 return cached
 
@@ -141,15 +147,17 @@ class LLMClient:
         provider = self._get_provider(effective_model)
 
         # RPM 스로틀링 — 모델별 최소 간격 적용 (캐시 히트는 제외됨)
+        # 동시성(D55): min_interval>0(Gemini 등)은 락으로 간격을 직렬화해 RPM 보존.
+        # min_interval=0(상용 Claude/OpenAI)은 블록 건너뜀 → 완전 병렬.
         min_interval = self._MIN_INTERVAL.get(effective_model, 0.0)
         if min_interval > 0 and _retry_count == 0:
-            elapsed_since_last = time.time() - self._last_call_time
-            if elapsed_since_last < min_interval:
-                wait = min_interval - elapsed_since_last
-                time.sleep(wait)
+            with self._lock:
+                elapsed_since_last = time.time() - self._last_call_time
+                if elapsed_since_last < min_interval:
+                    time.sleep(min_interval - elapsed_since_last)
+                self._last_call_time = time.time()
 
         start = time.time()
-        self._last_call_time = start
 
         try:
             result_chat = provider.chat(
@@ -215,7 +223,8 @@ class LLMClient:
         )
 
         if use_cache:
-            cache_store.put(contract_id, contract.version, cache_inputs, result)
+            with self._lock:
+                cache_store.put(contract_id, contract.version, cache_inputs, result)
 
         return result
 
@@ -319,6 +328,10 @@ class LLMClient:
         model: str,
     ) -> None:
         ts = int(time.time())
+        # 동시성(D55): 같은 초 + 같은 contract 동시 호출 시 파일명 충돌 방지용 시퀀스
+        with self._lock:
+            self._log_seq += 1
+            seq = self._log_seq
         log = {
             "contract_id": contract_id,
             "provider": provider_name,
@@ -332,5 +345,5 @@ class LLMClient:
             "raw_response": raw,
             "parsed": parsed,
         }
-        log_path = self._log_dir / f"{ts}_{contract_id}.json"
+        log_path = self._log_dir / f"{ts}_{seq:04d}_{contract_id}.json"
         log_path.write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
