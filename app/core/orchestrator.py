@@ -65,6 +65,15 @@ class RunConfig:
     slow_mo_ms: int = 0
     """Stage 5에서 액션 사이 인공 지연(ms). 헤드풀 모드에서 천천히 보기 위함."""
 
+    dedup_global_components: bool = True
+    """Stage 0 — 헤더·푸터·네비처럼 여러 페이지 공통 요소를 전역 컴포넌트로 1회만
+    명세(D51). GnuBoard5 헤더 로그인 박스가 페이지마다 중복 추출되어 인증 도메인이
+    과대표집되던 문제 해소. False면 기존 동작(페이지마다 전부 명세)."""
+
+    global_ratio: float = 0.4
+    """전역 컴포넌트 판정 임계 — 이 비율 이상 페이지에 동일 셀렉터로 등장하면 전역.
+    실측: 로그인 폼이 49.4% 페이지에 등장 → 0.5면 놓침. 0.4로 잡되 고유 콘텐츠는 안전."""
+
 
 class Orchestrator:
     """AWT Stage 0~7 실행 제어."""
@@ -156,6 +165,8 @@ class Orchestrator:
             selected_urls=self.config.selected_urls,
             cached_features=self.config.cached_features,
             should_stop=self.is_stopped,
+            dedup_global_components=self.config.dedup_global_components,
+            global_ratio=self.config.global_ratio,
         )
         self._stage = 0
         return result

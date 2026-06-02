@@ -8,7 +8,9 @@
 """
 from __future__ import annotations
 import json
+import math
 import re
+from collections import Counter
 from pathlib import Path
 from typing import Callable
 
@@ -49,6 +51,86 @@ def _chunk_elements(elements: list[dict], chunk_size: int = _CHUNK_SIZE) -> list
     return [elements[i : i + chunk_size] for i in range(0, max(len(elements), 1), chunk_size)]
 
 
+# ── 전역 컴포넌트 dedup (D51) ─────────────────────────────────────────────────
+# 헤더·푸터·네비처럼 여러 페이지에 동일 셀렉터로 반복되는 요소를 1회만 명세하기 위한
+# 규칙 기반(LLM 불필요) 탐지. GnuBoard5 헤더 로그인 박스가 44/89 페이지에서 중복
+# 추출되어 인증 도메인 TC가 ~30%로 과대표집되던 문제(C1) 해소.
+# 실측: GnuBoard5 로그인 폼은 44/89(49.4%) 페이지에 등장 → 로그인 상태 전환으로
+# 헤더가 절반만 노출되므로, 0.5(임계 45)면 로그인(44)을 놓친다. 0.4(임계 36)로
+# 잡되, 페이지 고유 콘텐츠(고유 지문)는 40%에 못 미쳐 과병합되지 않는다.
+_GLOBAL_RATIO_DEFAULT      = 0.4   # 이 비율 이상 페이지에 등장하면 전역으로 판정
+_MIN_PAGES_FOR_GLOBAL      = 5     # 페이지 모수가 이보다 적으면 전역 탐지 비활성(오탐 방지)
+
+
+def _norm_text(s: str) -> str:
+    """전역 지문용 텍스트 정규화 — 공백 축약·소문자·길이 제한."""
+    s = (s or "").strip().lower()
+    s = re.sub(r"\s+", " ", s)
+    return s[:60]
+
+
+def _element_signature(el: dict):
+    """전역 컴포넌트 판정용 지문 = (tag, id, name, type, normalized_text).
+
+    - href는 쿼리·앵커 변동이 커서 제외(같은 네비 링크라도 페이지마다 달라질 수 있음).
+    - id/name/text 중 하나라도 있어야 '식별 가능' → 전역 후보.
+      셋 다 없는 익명 요소(예: 라벨 없는 입력칸)는 None을 반환해 전역에서 제외 →
+      서로 다른 의미의 익명 요소가 한 덩어리로 과병합되는 것을 방지.
+    """
+    id_   = (el.get("id", "") or "").strip()
+    name  = (el.get("name", "") or "").strip()
+    text  = _norm_text(el.get("text", ""))
+    if not (id_ or name or text):
+        return None
+    return (
+        el.get("tag", ""),
+        id_,
+        name,
+        (el.get("type", "") or "").strip(),
+        text,
+    )
+
+
+def _detect_global_components(
+    page_elements_list: list[list[dict]],
+    ratio: float,
+    min_pages: int,
+) -> tuple[set, dict]:
+    """여러 페이지에 동일 지문으로 반복되는 요소를 전역으로 판정.
+
+    Returns:
+        (global_sigs, report) — global_sigs는 전역 지문 집합.
+    """
+    n_pages = len(page_elements_list)
+    if n_pages < min_pages:
+        return set(), {
+            "enabled": False,
+            "reason": f"pages({n_pages})<min({min_pages})",
+            "total_pages": n_pages,
+        }
+
+    presence: Counter = Counter()
+    for elements in page_elements_list:
+        seen = set()
+        for el in elements:
+            sig = _element_signature(el)
+            if sig is not None:
+                seen.add(sig)
+        for sig in seen:
+            presence[sig] += 1
+
+    threshold = max(2, math.ceil(n_pages * ratio))  # 최소 2개 페이지 공통이어야 전역
+    global_sigs = {sig for sig, c in presence.items() if c >= threshold}
+    report = {
+        "enabled": True,
+        "total_pages": n_pages,
+        "ratio": ratio,
+        "threshold_pages": threshold,
+        "global_signatures": len(global_sigs),
+    }
+    return global_sigs, report
+
+
 def _safe_filename(url: str, base_url: str) -> str:
     """URL 경로를 파일명용 안전 문자열로 변환 (최대 40자)."""
     path = url.replace(base_url, "").strip("/") or "home"
@@ -65,6 +147,9 @@ def scan(
     selected_urls: list[str] | None = None,
     cached_features: dict[str, list[dict]] | None = None,
     should_stop: Callable[[], bool] | None = None,
+    dedup_global_components: bool = True,
+    global_ratio: float = _GLOBAL_RATIO_DEFAULT,
+    min_pages_for_global: int = _MIN_PAGES_FOR_GLOBAL,
 ) -> dict:
     """URL을 스캔해 feature-spec-draft.md 생성. LLM 명세 초안 반환.
 
@@ -85,6 +170,7 @@ def scan(
     screenshots_dir.mkdir(parents=True, exist_ok=True)
 
     all_features: list[dict] = []
+    page_specs: list[dict] = []  # Pass 1 수집: [{url, screenshot, elements}] (전역 dedup 후 Pass 2에서 DOM_SPEC)
     visited: set[str] = set()
     llm_error_count = 0          # LLM 호출 실패 누적
     llm_call_count  = 0          # LLM 호출 성공 누적
@@ -171,52 +257,17 @@ def scan(
                     _cb(f"  스크린샷 실패 (무시): {ss_err}")
                     screenshot_name = ""
 
-                # ── DOM 요소 추출 ────────────────────────────────────────────
+                # ── DOM 요소 추출 (Pass 1: 수집만, DOM_SPEC는 전역 dedup 후) ──
                 elements = _extract_elements(page)
                 if not elements:
                     _cb(f"  DOM 요소 없음 — 스킵: {cur_url}")
                     continue
-
-                chunks = _chunk_elements(elements)
-                _cb(f"  DOM 요소 {len(elements)}개 → {len(chunks)}개 청크로 분할")
-
-                # ── 청크별 DOM_SPEC 호출 (오류 시 재시도) ────────────────────
-                page_feature_count = 0
-                for chunk_idx, chunk in enumerate(chunks, 1):
-                    success = False
-                    for attempt in range(1, _CHUNK_MAX_RETRY + 1):
-                        try:
-                            result = llm_client.call("DOM_SPEC", {
-                                "url": cur_url,
-                                "dom_elements_json": json.dumps(
-                                    chunk, ensure_ascii=False
-                                ),
-                            })
-                            llm_call_count += 1
-                            feats = result.get("features", [])
-                            for feat in feats:
-                                feat["screenshot_file"] = screenshot_name
-                                feat["source_url"]      = cur_url   # URL별 캐시용
-                            all_features.extend(feats)
-                            page_feature_count += len(feats)
-                            if not feats:
-                                _cb(f"  청크 {chunk_idx}/{len(chunks)}: features 0개 "
-                                    f"(요소 미흡 가능)")
-                            success = True
-                            break
-                        except Exception as e:
-                            llm_error_count += 1
-                            if attempt < _CHUNK_MAX_RETRY:
-                                _cb(f"  ⚠ DOM_SPEC 오류 재시도 "
-                                    f"({attempt}/{_CHUNK_MAX_RETRY}): {e}")
-                            else:
-                                _cb(f"  ✗ DOM_SPEC 최종 실패 "
-                                    f"(청크 {chunk_idx}/{len(chunks)}): {e}")
-
-                    if not success:
-                        _cb(f"  청크 {chunk_idx} 건너뜀")
-
-                _cb(f"  페이지 기능 {page_feature_count}개 추출")
+                page_specs.append({
+                    "url":        cur_url,
+                    "screenshot": screenshot_name,
+                    "elements":   elements,
+                })
+                _cb(f"  DOM 요소 {len(elements)}개 수집")
 
                 # 같은 origin 링크 수집 (depth+1) — selected_urls 모드에서는 생략
                 if do_bfs and depth < 2:
@@ -232,6 +283,87 @@ def scan(
 
         browser.close()
 
+    # ── Pass 2: 전역 컴포넌트 dedup 후 DOM_SPEC (D51) ─────────────────────────
+    def _spec_elements(elements, src_url, screenshot, scope, label):
+        """주어진 요소 묶음을 청크로 나눠 DOM_SPEC 호출 → all_features에 적재."""
+        nonlocal llm_call_count, llm_error_count
+        chunks = _chunk_elements(elements)
+        count = 0
+        for chunk_idx, chunk in enumerate(chunks, 1):
+            if should_stop and should_stop():
+                _cb("⏹ 사용자 중단 — DOM_SPEC 종료")
+                break
+            success = False
+            for attempt in range(1, _CHUNK_MAX_RETRY + 1):
+                try:
+                    result = llm_client.call("DOM_SPEC", {
+                        "url": src_url,
+                        "dom_elements_json": json.dumps(chunk, ensure_ascii=False),
+                    })
+                    llm_call_count += 1
+                    feats = result.get("features", [])
+                    for feat in feats:
+                        feat["screenshot_file"] = screenshot
+                        feat["source_url"]      = src_url   # URL별 캐시용
+                        feat["scope"]           = scope     # "global" | "page"
+                    all_features.extend(feats)
+                    count += len(feats)
+                    success = True
+                    break
+                except Exception as e:
+                    llm_error_count += 1
+                    if attempt < _CHUNK_MAX_RETRY:
+                        _cb(f"  ⚠ DOM_SPEC 오류 재시도 "
+                            f"({attempt}/{_CHUNK_MAX_RETRY}): {e}")
+                    else:
+                        _cb(f"  ✗ DOM_SPEC 최종 실패 "
+                            f"({label} 청크 {chunk_idx}/{len(chunks)}): {e}")
+            if not success:
+                _cb(f"  {label} 청크 {chunk_idx} 건너뜀")
+        return count
+
+    # 전역 컴포넌트 판정 + 페이지별 요소에서 제거
+    global_report: dict = {"enabled": False}
+    global_elements: dict = {}   # sig → 대표 요소 1개
+    if dedup_global_components and page_specs:
+        global_sigs, global_report = _detect_global_components(
+            [ps["elements"] for ps in page_specs], global_ratio, min_pages_for_global
+        )
+        if global_sigs:
+            for ps in page_specs:
+                kept = []
+                for el in ps["elements"]:
+                    sig = _element_signature(el)
+                    if sig is not None and sig in global_sigs:
+                        global_elements.setdefault(sig, el)  # 첫 등장만 보존(이동)
+                    else:
+                        kept.append(el)
+                ps["elements"] = kept
+            global_report["global_elements_extracted"] = len(global_elements)
+            _cb(f"🌐 전역 컴포넌트 {len(global_elements)}종 감지 "
+                f"(≥{global_report['threshold_pages']}/{global_report['total_pages']} 페이지 공통) "
+                f"→ 1회만 명세")
+
+    # 전역 컴포넌트 먼저 명세 (1회)
+    if global_elements:
+        gc = _spec_elements(
+            list(global_elements.values()), "__global__", "", "global", "전역"
+        )
+        _cb(f"  전역 컴포넌트 기능 {gc}개 추출")
+
+    # 페이지별(전역 제거됨) 명세
+    for i, ps in enumerate(page_specs, 1):
+        if should_stop and should_stop():
+            _cb("⏹ 사용자 중단 — DOM_SPEC 종료")
+            break
+        if not ps["elements"]:
+            continue
+        _cb(f"명세 중 ({i}/{len(page_specs)}): {ps['url']} — 요소 {len(ps['elements'])}개")
+        pc = _spec_elements(
+            ps["elements"], ps["url"], ps["screenshot"], "page", ps["url"]
+        )
+        _cb(f"  페이지 기능 {pc}개 추출")
+
     # ── feature 스키마 정규화 ────────────────────────────────────────────────
     # LLM이 category_mid 등을 누락하거나, 구버전 캐시 draft가 다른 스키마일 때
     # 이후 단계(markdown 요약·Stage 1 leaf 추출)가 KeyError로 죽지 않도록 보강.
@@ -246,6 +378,7 @@ def scan(
         f.setdefault("source_element", "")
         f.setdefault("confidence", "")
         f.setdefault("screenshot_file", "")
+        f.setdefault("scope", "page")   # 캐시 passthrough feature는 scope 없음 → page
 
     # ── 명세 초안 저장 ────────────────────────────────────────────────────────
     draft = {
@@ -255,6 +388,7 @@ def scan(
         "llm_calls":     llm_call_count,
         "llm_errors":    llm_error_count,
         "cache_hits":    cache_hit_count,
+        "global_component_report": global_report,   # D51 전역 dedup 결과
     }
     spec_path = out_dir / "feature-spec-draft.json"
     spec_path.write_text(json.dumps(draft, ensure_ascii=False, indent=2), encoding="utf-8")
