@@ -604,6 +604,17 @@ class RunWizard(QDialog):
         e_lay.addWidget(headless_hint)
         lay.addWidget(exec_box)
 
+        # ── 기능 확정 게이트 (D53) ────────────────────────────────────────────
+        self._feature_gate_cb = QCheckBox(
+            "Stage 1 후 기능 확정 게이트 표시 (TC 설계 전 불필요한 기능 제외)"
+        )
+        self._feature_gate_cb.setChecked(False)   # 기본: 끄기(기존 동작)
+        self._feature_gate_cb.setToolTip(
+            "체크 시, 기능 통합 후 도메인별 집계를 보여주고 TC를 설계할 기능을 사용자가\n"
+            "확정할 수 있습니다(불필요한 기능 제외 → TC 수·시간 절감). 체크 안 하면 전체 진행."
+        )
+        lay.addWidget(self._feature_gate_cb)
+
         lay.addStretch()
         summary_lbl = QLabel("설정을 확인하고 '실행 시작'을 클릭하면 파이프라인이 시작됩니다.")
         summary_lbl.setWordWrap(True)
@@ -728,6 +739,7 @@ class RunWizard(QDialog):
             model_overrides=model_overrides or None,
             headless_exec=not self._headless_cb.isChecked(),  # 체크 = 보이게 (headless=False)
             slow_mo_ms=self._slowmo_spin.value() if self._headless_cb.isChecked() else 0,
+            feature_gate=self._feature_gate_cb.isChecked(),   # D53
         )
         self.run_config_ready.emit(config)
         self.accept()
@@ -800,6 +812,11 @@ class RunWizard(QDialog):
                 self._slowmo_spin.setValue(int(cfg["slow_mo_ms"]))
             except (TypeError, ValueError):
                 pass
+        # D53 — meta의 feature_gate는 결과 dict({shown,...})일 수 있음 → 양쪽 안전 처리
+        fg = cfg.get("feature_gate", False)
+        self._feature_gate_cb.setChecked(
+            bool(fg.get("shown")) if isinstance(fg, dict) else bool(fg)
+        )
 
     # ── 파일 목록 ─────────────────────────────────────────────────────────
     def _add_files(self) -> None:

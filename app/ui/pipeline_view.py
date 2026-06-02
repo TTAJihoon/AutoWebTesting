@@ -93,38 +93,54 @@ class _StageCircle(QLabel):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class _PreGateWorker(QThread):
-    """Stage 0~3 백그라운드 실행."""
-    stage_done = Signal(int)
-    finished   = Signal(list)
-    error      = Signal(str)
+    """Stage 0~3 백그라운드 실행.
 
-    def __init__(self, orch: Orchestrator, has_files: bool, reuse_stage0: bool = False):
+    D53 기능 확정 게이트 지원:
+      - stop_after_ingest=True  → Stage 0~1만 실행 후 ingest_ready(leaves) emit하고 정지.
+      - resume_from_stage2=True → Stage 0~1 생략, Stage 2~3만 실행(게이트 확정 후 재개).
+      - 둘 다 False(기본)      → Stage 0~3 연속 실행(게이트 미사용 기존 동작).
+    """
+    stage_done   = Signal(int)
+    finished     = Signal(list)
+    error        = Signal(str)
+    ingest_ready = Signal(list)   # D53 — Stage 1 후 leaves 전달(게이트용)
+
+    def __init__(self, orch: Orchestrator, has_files: bool, reuse_stage0: bool = False,
+                 stop_after_ingest: bool = False, resume_from_stage2: bool = False):
         super().__init__()
         self._orch      = orch
         self._has_files = has_files
         self._reuse_stage0 = reuse_stage0   # 기존 Stage 0 draft 재사용 (재스캔 생략)
+        self._stop_after_ingest  = stop_after_ingest
+        self._resume_from_stage2 = resume_from_stage2
 
     # 사용자 중단 시그널 — 중단되어도 부분 TC를 넘김
     stopped = Signal(list)
 
     def run(self) -> None:
         try:
-            feature_spec = None
-            if not self._has_files:
-                if self._reuse_stage0:
-                    # 기존 분석 결과 로드 — DOM 재스캔/페이지선택 생략
-                    feature_spec = self._orch.load_stage0_draft()
-                    if feature_spec is None:
+            if not self._resume_from_stage2:
+                feature_spec = None
+                if not self._has_files:
+                    if self._reuse_stage0:
+                        # 기존 분석 결과 로드 — DOM 재스캔/페이지선택 생략
+                        feature_spec = self._orch.load_stage0_draft()
+                        if feature_spec is None:
+                            feature_spec = self._orch.run_stage0()
+                    else:
                         feature_spec = self._orch.run_stage0()
-                else:
-                    feature_spec = self._orch.run_stage0()
+                    if self._orch.is_stopped():
+                        self.stopped.emit([]); return
+                    self.stage_done.emit(1)
+                self._orch.run_stage1(feature_spec)
                 if self._orch.is_stopped():
                     self.stopped.emit([]); return
-                self.stage_done.emit(1)
-            self._orch.run_stage1(feature_spec)
-            if self._orch.is_stopped():
-                self.stopped.emit([]); return
-            self.stage_done.emit(2)
+                self.stage_done.emit(2)
+                if self._stop_after_ingest:
+                    # D53 — 게이트로 leaves 전달 후 정지(메인스레드가 Stage 2~3 재개)
+                    leaves = (self._orch.ingest_result or {}).get("leaves", [])
+                    self.ingest_ready.emit(leaves)
+                    return
             self._orch.run_stage2()
             if self._orch.is_stopped():
                 # Stage 2 중단 — 지금까지 만든 TC가 있으면 보존
@@ -917,10 +933,57 @@ class PipelineView(QMainWindow):
         self._stop_btn.setEnabled(True)
         self._stop_btn.setVisible(True)
 
+        gate_on = bool(getattr(self._config, "feature_gate", False))
         self._pre_worker = _PreGateWorker(
             orch=self._orch,
             has_files=bool(self._config.input_files),
             reuse_stage0=reuse_stage0,
+            stop_after_ingest=gate_on,   # D53 — 게이트 켜면 Stage 1 후 정지
+        )
+        self._pre_worker.stage_done.connect(self._on_pre_stage_done)
+        self._pre_worker.finished.connect(self._on_pre_gate_done)
+        self._pre_worker.stopped.connect(self._on_pre_gate_stopped)
+        self._pre_worker.error.connect(self._on_error)
+        if gate_on:
+            self._pre_worker.ingest_ready.connect(self._on_ingest_ready)
+        self._pre_worker.start()
+
+    # ── D53 기능 확정 게이트 ──────────────────────────────────────────────────
+    def _on_ingest_ready(self, leaves: list) -> None:
+        """Stage 1 완료 → 기능 확정 게이트 표시 → Stage 2~3 재개."""
+        from app.ui.feature_gate import FeatureGate
+        n_before = len(leaves)
+        excluded = 0
+        if leaves:
+            dlg = FeatureGate(leaves, parent=self)
+            if dlg.exec() == QDialog.Accepted:
+                # 확정된 leaf만 Stage 2 대상으로 반영
+                if self._orch.ingest_result is not None:
+                    self._orch.ingest_result["leaves"] = dlg.kept_leaves
+                excluded = dlg.excluded_count
+                # 추적성 기록
+                self._orch.ingest_result.setdefault("feature_gate", {})
+                self._orch.ingest_result["feature_gate"] = {
+                    "shown": True,
+                    "leaves_before": n_before,
+                    "leaves_after": len(dlg.kept_leaves),
+                    "excluded": excluded,
+                }
+            else:
+                self._append_log("기능 확정 게이트 취소 — 전체 기능으로 진행합니다.")
+        if excluded:
+            self._append_log(
+                f"기능 확정 — {n_before}개 중 {excluded}개 제외, "
+                f"{n_before - excluded}개로 TC 설계 진행."
+            )
+        else:
+            self._append_log(f"기능 확정 — 전체 {n_before}개 기능으로 TC 설계 진행.")
+
+        # Stage 2~3 재개 (새 worker) — resume 모드라 stage0/1·reuse_stage0 무관
+        self._pre_worker = _PreGateWorker(
+            orch=self._orch,
+            has_files=bool(self._config.input_files),
+            resume_from_stage2=True,
         )
         self._pre_worker.stage_done.connect(self._on_pre_stage_done)
         self._pre_worker.finished.connect(self._on_pre_gate_done)
@@ -1549,6 +1612,7 @@ class PipelineView(QMainWindow):
                 # ── 커버리지: 기능 정제/통합 리포트 + 시험 커버리지 % ────────
                 "refine_report":      (self._orch.ingest_result or {}).get("refine_report", {}),
                 "consolidate_report": (self._orch.ingest_result or {}).get("consolidate_report", {}),
+                "feature_gate":       (self._orch.ingest_result or {}).get("feature_gate", {}),
                 "coverage":           self._compute_coverage(),
             }
             if "created_at" not in meta:
