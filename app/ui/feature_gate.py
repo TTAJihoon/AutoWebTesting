@@ -50,8 +50,8 @@ class FeatureGate(QDialog):
 
         title = QLabel(
             "<b style='font-size:15px; color:#1e293b;'>기능 확정</b>"
-            "<span style='color:#64748b; font-size:12px;'>  — TC를 설계할 기능을 확인하고,"
-            " 불필요한 기능은 체크 해제하세요. (그대로 두면 전부 진행)</span>"
+            "<span style='color:#64748b; font-size:12px;'>  — <b>도메인(대분류) 단위</b>로 확인하세요."
+            " 시험하지 않을 도메인은 체크만 해제하면 됩니다. (개별 기능은 펼쳐서 조정 — 그대로 두면 전부 진행)</span>"
         )
         root.addWidget(title)
 
@@ -153,7 +153,9 @@ class FeatureGate(QDialog):
                 child.setCheckState(0, Qt.Checked)
                 child.setData(0, Qt.UserRole, idx)   # leaf 원본 인덱스
         self._tree.blockSignals(False)
-        self._tree.expandAll()
+        # 기본은 접힌 상태 — 도메인(대분류) 단위로 먼저 보고, 필요한 것만 펼침.
+        # (leaf 수백~수천 개를 일일이 읽지 않고 도메인 통째로 제외 가능)
+        self._tree.collapseAll()
 
     # ── 이벤트 ──────────────────────────────────────────────────────────────
     def _on_item_changed(self, item: QTreeWidgetItem, col: int) -> None:

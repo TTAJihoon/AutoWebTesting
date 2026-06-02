@@ -875,9 +875,22 @@ class PipelineView(QMainWindow):
             or self._config.target_url.lower().startswith("file://")
         )
 
-        # ── 기존 Stage 0 분석 결과가 있으면 재사용 여부 확인 ──────────────
-        # (이력에서 다시 연 run 등 — 페이지 재수집·재스캔 없이 바로 Stage 1~3)
+        # ── 원클릭 자동 진행 (auto_pages): 페이지 선택·재사용 프롬프트 생략 ────
+        # 새 BFS 스캔으로 바로 진행 → D51 전역dedup·D52 한글 생성 적용.
         reuse_stage0 = False
+        auto_pages = bool(getattr(self._config, "auto_pages", True))
+        if auto_pages and not skip_stage0:
+            self._config.selected_urls = None     # BFS 전체 자동
+            self._config.cached_features = None   # 캐시 미사용 — 새로 스캔(한글·dedup 적용)
+            self._config.selected_url_groups = {}
+            self._append_log(
+                f"페이지 자동 수집(BFS, 최대 {self._config.max_pages or 30}개) — 새로 스캔합니다."
+            )
+            self._begin_pre_worker(reuse_stage0=False)
+            return
+
+        # ── (수동 모드) 기존 Stage 0 분석 결과가 있으면 재사용 여부 확인 ──────
+        # (이력에서 다시 연 run 등 — 페이지 재수집·재스캔 없이 바로 Stage 1~3)
         if not skip_stage0 and self._orch.has_stage0_draft():
             res = QMessageBox.question(
                 self, "기존 분석 결과 발견",
@@ -921,6 +934,10 @@ class PipelineView(QMainWindow):
                 msg += f"\n      🧹 동형 페이지 {n_merged}개는 대표로 묶여 제외됨 (추적성: meta.json 기록)"
             self._append_log(msg)
 
+        self._begin_pre_worker(reuse_stage0=reuse_stage0)
+
+    def _begin_pre_worker(self, reuse_stage0: bool = False) -> None:
+        """Stage 1~3 워커 시작 (자동/수동 공통 진입점)."""
         self._run_btn.setEnabled(False)
         # (페이지 선택 진행 로그를 보존하기 위해 self._log.clear() 호출하지 않음)
         self._update_circles(1, "Stage 1~3 실행 중")

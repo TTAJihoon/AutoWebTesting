@@ -604,6 +604,18 @@ class RunWizard(QDialog):
         e_lay.addWidget(headless_hint)
         lay.addWidget(exec_box)
 
+        # ── 페이지 선택 자동 진행 (원클릭 실행) ────────────────────────────────
+        self._auto_pages_cb = QCheckBox(
+            "페이지 선택 자동 진행 (수동 선택·재사용 프롬프트 생략, 새로 스캔)"
+        )
+        self._auto_pages_cb.setChecked(True)   # 기본: 원클릭 자동
+        self._auto_pages_cb.setToolTip(
+            "체크(기본): 실행 버튼을 누르면 페이지를 자동 수집(BFS)해 바로 진행합니다.\n"
+            "  → 매번 새로 스캔하므로 전역 컴포넌트 중복 제거·한글 생성이 적용됩니다.\n"
+            "체크 해제: 페이지를 직접 선택하거나 기존 분석 결과(캐시)를 재사용합니다(비용 절감)."
+        )
+        lay.addWidget(self._auto_pages_cb)
+
         # ── 기능 확정 게이트 (D53) ────────────────────────────────────────────
         self._feature_gate_cb = QCheckBox(
             "Stage 1 후 기능 확정 게이트 표시 (TC 설계 전 불필요한 기능 제외)"
@@ -740,6 +752,7 @@ class RunWizard(QDialog):
             headless_exec=not self._headless_cb.isChecked(),  # 체크 = 보이게 (headless=False)
             slow_mo_ms=self._slowmo_spin.value() if self._headless_cb.isChecked() else 0,
             feature_gate=self._feature_gate_cb.isChecked(),   # D53
+            auto_pages=self._auto_pages_cb.isChecked(),       # 원클릭 자동 진행
         )
         self.run_config_ready.emit(config)
         self.accept()
@@ -817,6 +830,7 @@ class RunWizard(QDialog):
         self._feature_gate_cb.setChecked(
             bool(fg.get("shown")) if isinstance(fg, dict) else bool(fg)
         )
+        self._auto_pages_cb.setChecked(bool(cfg.get("auto_pages", True)))
 
     # ── 파일 목록 ─────────────────────────────────────────────────────────
     def _add_files(self) -> None:
