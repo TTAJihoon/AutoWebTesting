@@ -19,6 +19,12 @@ class MockLLMClient:
         self._call_count += 1
         if contract_id == "TC_DESIGN":
             return self._tc_design(inputs)
+        if contract_id == "TC_DESIGN_GROUP":     # D54-A
+            return self._tc_design_group(inputs)
+        if contract_id == "TC_FLOW":             # D54-B
+            return self._tc_flow(inputs)
+        if contract_id == "TC_V10_GROUP":        # D56
+            return self._tc_v10_group(inputs)
         if contract_id == "TC_REGEN":
             return self._tc_regen(inputs)
         if contract_id == "DOM_SPEC":
@@ -54,6 +60,60 @@ class MockLLMClient:
             t["requirement_id"] = req_id
             result.append(t)
         return {"tcs": result}
+
+    # ── TC_DESIGN_GROUP (D54-A) — features_block의 각 기능에 canned TC + leaf_index ──
+    def _tc_design_group(self, inputs: dict) -> dict:
+        block = inputs.get("features_block", "")
+        out: list[dict] = []
+        for line in block.splitlines():
+            m = re.match(r"^\s*(\d+)\.\s*\[(.*?)\]", line)
+            if not m:
+                continue
+            gi = int(m.group(1))
+            parts = [p.strip() for p in m.group(2).split(">")]
+            major = parts[0] if parts else ""
+            mid   = parts[1] if len(parts) > 1 else ""
+            leaf  = parts[-1] if parts else ""
+            tcs = _GNUBOARD5_TCS.get(leaf) or _generic_tcs(leaf, mid, major, "")
+            for tc in tcs:
+                t = dict(tc)
+                t["leaf_index"] = gi      # stage2가 leaf로 매핑
+                out.append(t)
+        return {"tcs": out}
+
+    # ── TC_FLOW (D54-B) — 회귀 안정성 위해 빈 여정(코드 경로만 통과) ──
+    def _tc_flow(self, inputs: dict) -> dict:
+        return {"flows": []}
+
+    # ── TC_V10_GROUP (D56) — 누락 카테고리당 음성 TC 1개 + leaf_index ──
+    def _tc_v10_group(self, inputs: dict) -> dict:
+        block = inputs.get("features_block", "")
+        out: list[dict] = []
+        cur_gi: int | None = None
+        cur_leaf = ""
+        _cats = ("validation_failure", "duplicate_or_conflict", "permission_denied",
+                 "boundary_violation", "injection_or_security")
+        for line in block.splitlines():
+            m = re.match(r"^\s*(\d+)\.\s*\[(.*?)\]", line)
+            if m:
+                cur_gi = int(m.group(1))
+                parts = [p.strip() for p in m.group(2).split(">")]
+                cur_leaf = parts[-1] if parts else ""
+            elif "누락 음성 카테고리" in line and cur_gi is not None:
+                for c in [c for c in _cats if c in line]:
+                    out.append({
+                        "leaf_index": cur_gi,
+                        "scenario": f"{cur_leaf} — {c} 음성 케이스",
+                        "precondition": "해당 조건 위반 입력",
+                        "expected_output": "오류 메시지 표시 또는 차단",
+                        "technique": "negative_deep",
+                        "negative_category": c,
+                        "source_quote": "INVARIANT: required_field_empty_rejection",
+                        "gen_confidence": 0.6,
+                        "applied_invariant": "required_field_empty_rejection",
+                        "related_defect_id": None,
+                    })
+        return {"tcs": out}
 
     def _tc_regen(self, inputs: dict) -> dict:
         # 실패 TC를 다시 생성 — 여기서는 source_quote를 INFERRED로 고정해 통과
