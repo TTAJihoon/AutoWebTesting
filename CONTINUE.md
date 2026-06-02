@@ -4,7 +4,32 @@
 
 ---
 
-## 1. 지금 어디까지 했나 (Last updated: 2026-06-01)
+## 1. 지금 어디까지 했나 (Last updated: 2026-06-02)
+
+### ✅ 2026-06-02 세션 — 로그인 편중 해소 + 생성 시간 단축 + 검토 부담 완화 + UX
+
+브랜치 `AWT-claude`에 단계별 커밋 완료(전부 push됨). 설계 근거: `doc/06-decisions.md` D51~D58, 상세 `doc/08~10`.
+
+**구현 완료 (모두 옵트아웃 가능 — 회귀 없음):**
+- **D51 전역 컴포넌트 dedup** (`stage0_dom_scan`): 헤더 로그인 등 ≥40% 페이지 공통 요소를 `__global__`로 1회만 명세 → 로그인 편중 1순위 원인 해소.
+- **D52 카테고리 통제 어휘** (`app/core/taxonomy.py`): 대분류 12종 고정 + 중/소분류 한글 생성(dom_spec). 인증 분열(User Management/Authentication/Account) 통합.
+- **D53 기능 확정 게이트** (`app/ui/feature_gate.py`, opt-in): Stage1↔2 사이 도메인(대분류) 단위 집계·제외. 기본 접힘.
+- **D54 페이지 그룹 TC 설계**(`TC_DESIGN_GROUP`)+**교차 페이지 시나리오**(`TC_FLOW`): leaf 1개씩→source_url 그룹 → 호출 급감 + 기능 관계 인식.
+- **D55 LLM 병렬화** (`llm_client` Lock + ThreadPoolExecutor): `RunConfig.concurrency`(기본6, =1 순차), 결과 입력순 병합=결정성.
+- **D56 V10 보완 배치** (`TC_V10_GROUP`): gap당 순차(777)→페이지 배치, 증식 상한 6/leaf, screenshot 전파.
+- **D57 Reviewer Gate 리스크 버킷**: 위험점수(신뢰도+근거+기법)로 🔴/🟡/🟢, 🟢 일괄승인, 위험군 진행률. DOM-only도 동작.
+- **D58 상세 패널**: 스크린샷·전후이동·키보드(A/E/R) — failure_detail 재사용.
+- **UX**: 원클릭 자동 실행(`RunConfig.auto_pages` 기본 ON — 페이지선택 생략·새 BFS), TC목록 대/중/소분류 컬럼·Excel, 기능리스트 한글·병합셀, **실행 정보 다이얼로그**(`run_info.py` — 설정·수집요소 조회/수정/복제재실행).
+- **Mock 회귀 복구**: MockLLMClient에 신규 contract 핸들러 추가 → `scripts/run_stage123_mock.py` Stage2 79개·INFERRED 0% 보존, 호출 26+→6.
+
+**⚠️ 다음 작업자 주의:**
+- **캐시 재사용 = 옛(영어·미정리) feature**. D51/D52는 *새 스캔*에만 적용 → 깨끗한 결과는 "페이지 선택 자동 진행"(기본 ON)으로 새로 스캔.
+- **라이브 미검증**: 전부 mock(가짜 LLM) 단위/통합 검증만. 실 GnuBoard5+실 LLM end-to-end 검증 필요(확인 포인트: MANUAL.md 헤더 "최근 변경").
+- 앱 재시작 필수(`python app/main.py`).
+
+**다음 행동 후보:** ① 라이브 재실행으로 인증비율·생성시간·기능 수 실측 ② cap(12)·동시성(6)·버킷 임계값 튜닝 ③ stage0/stage6 병렬화 확장 ④ 기능 수 여전히 많으면 leaf 단위 dedup 강화.
+
+---
 
 ### ✅ D69·D70 — Phase B 보강 + 분류 게이트 (카탈로그 오탐 0 달성) (2026-06-01)
 
