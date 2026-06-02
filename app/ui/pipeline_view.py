@@ -458,15 +458,16 @@ class PipelineView(QMainWindow):
         # 최신 상태 backup (스냅샷 보기로 전환 전의 TC)
         self._latest_tcs_backup: list[dict] | None = None
 
-        self._tc_table = QTableWidget(0, 7)
+        self._tc_table = QTableWidget(0, 10)
         self._tc_table.setHorizontalHeaderLabels(
-            ["TC ID", "시나리오", "입력값", "예상값", "기법", "상태", "결과"]
+            ["대분류", "중분류", "소분류", "TC ID", "시나리오",
+             "입력값", "예상값", "기법", "상태", "결과"]
         )
         hdr = self._tc_table.horizontalHeader()
         # 모든 열을 사용자가 드래그로 자유롭게 조절 (Interactive) + 합리적 초기 너비
         hdr.setSectionResizeMode(QHeaderView.Interactive)
         hdr.setStretchLastSection(False)
-        for col, width in enumerate([100, 300, 150, 200, 90, 70, 70]):
+        for col, width in enumerate([100, 110, 140, 100, 280, 140, 160, 90, 70, 70]):
             self._tc_table.setColumnWidth(col, width)
         # 행 높이 일정하게 (긴 텍스트는 잘림, 더블클릭으로 상세 확인)
         self._tc_table.setWordWrap(False)
@@ -1449,13 +1450,16 @@ class PipelineView(QMainWindow):
             res_bg = result_colors.get(result, QColor("white"))
 
             cells = [
-                (0, tc.get("tc_id", ""),             bg),
-                (1, tc.get("scenario", ""),           bg),
-                (2, tc.get("precondition", "")[:80],  bg),
-                (3, tc.get("expected", "")[:80],      bg),
-                (4, _TECHNIQUE_KO.get(technique_en, technique_en), bg),
-                (5, _STATUS_KO.get(status, status),   bg),
-                (6, _RESULT_KO.get(result, result),   res_bg),
+                (0, tc.get("대분류", ""),             bg),
+                (1, tc.get("중분류", ""),             bg),
+                (2, tc.get("소분류", ""),             bg),
+                (3, tc.get("tc_id", ""),             bg),
+                (4, tc.get("scenario", ""),           bg),
+                (5, tc.get("precondition", "")[:80],  bg),
+                (6, tc.get("expected", "")[:80],      bg),
+                (7, _TECHNIQUE_KO.get(technique_en, technique_en), bg),
+                (8, _STATUS_KO.get(status, status),   bg),
+                (9, _RESULT_KO.get(result, result),   res_bg),
             ]
             for col, text, color in cells:
                 item = QTableWidgetItem(text)

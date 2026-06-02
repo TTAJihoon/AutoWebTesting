@@ -586,8 +586,18 @@ def build_features(features: list[dict], output_path: str | Path) -> Path:
         _header_style(cell, fill_color="1F4E79")  # 진한 남색 — TC Excel과 구분
         ws.column_dimensions[get_column_letter(ci)].width = _FEATURE_COL_WIDTHS.get(col, 16)
 
+    # 같은 분류끼리 인접하도록 정렬 (병합셀 전제) — 대분류 > 중분류 > 소분류
+    feats_sorted = sorted(
+        features,
+        key=lambda f: (
+            str(f.get("category_major", "")),
+            str(f.get("category_mid", "")),
+            str(f.get("category_leaf", "")),
+        ),
+    )
+
     # 데이터
-    for ri, feat in enumerate(features, 2):
+    for ri, feat in enumerate(feats_sorted, 2):
         for ci, col in enumerate(_FEATURE_COLS, 1):
             val  = feat.get(col, "")
             cell = ws.cell(row=ri, column=ci, value=_san(val))
@@ -604,7 +614,34 @@ def build_features(features: list[dict], output_path: str | Path) -> Path:
                 elif val_upper == "INFERRED":
                     cell.fill = _CONFIDENCE_FILLS["low"]
 
-    ws.auto_filter.ref = ws.dimensions
+    # ── 같은 분류 세로 병합셀 (대분류=1열, 중분류=2열) — 그룹 가독성 ──────────
+    n = len(feats_sorted)
+    if n >= 2:
+        merged_align = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+        def _merge_runs(col_idx: int, keyfn) -> None:
+            start = 2                       # 데이터 첫 행(헤더 다음)
+            prev  = keyfn(feats_sorted[0])
+            for i in range(1, n):
+                cur = keyfn(feats_sorted[i])
+                row = i + 2
+                if cur != prev:
+                    if row - 1 > start:     # run 길이 ≥ 2일 때만 병합
+                        ws.merge_cells(start_row=start, start_column=col_idx,
+                                       end_row=row - 1, end_column=col_idx)
+                        ws.cell(row=start, column=col_idx).alignment = merged_align
+                    start = row
+                    prev  = cur
+            last = n + 1
+            if last > start:
+                ws.merge_cells(start_row=start, start_column=col_idx,
+                               end_row=last, end_column=col_idx)
+                ws.cell(row=start, column=col_idx).alignment = merged_align
+
+        # 1열: 대분류 / 2열: (대분류,중분류) 동일 구간
+        _merge_runs(1, lambda f: str(f.get("category_major", "")))
+        _merge_runs(2, lambda f: (str(f.get("category_major", "")),
+                                  str(f.get("category_mid", ""))))
 
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)

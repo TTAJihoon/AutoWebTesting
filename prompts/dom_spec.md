@@ -17,7 +17,10 @@ ISO/IEC 25010 기능 적합성 관점으로 leaf 기능 단위까지 분해해.
   결제·쇼핑 / 폼·입력검증 / 알림·고객지원 / 관리자 / 정보표시·정책 / 설정·환경 / 기타
   - 로그인·로그아웃·회원가입·계정·프로필 → 모두 "회원·인증"
   - 어느 것에도 해당 없으면 "기타"
-(category_mid·category_leaf는 자유롭게 구체적으로 작성 — 통제 대상 아님)
+
+⚠ **한국어 출력 필수**: category_mid(중분류)·category_leaf(소분류)·implicit_spec은 반드시
+**한국어**로 작성해. 영어 기능명 금지(예: "Login Button"→"로그인 버튼", "Search Input"→"검색어 입력").
+고유명사·기술용어(URL, HTML 태그명 등)는 예외.
 
 추출 규칙 (필수):
 1. 인터랙티브 요소(button, input, a, select, textarea, form)는 기능 단위로 **빠짐없이** leaf로 추출해.
