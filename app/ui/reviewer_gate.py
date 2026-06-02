@@ -225,6 +225,7 @@ class ReviewerGate(QDialog):
         parent=None,
         llm_client=None,             # 재생성에 사용 (None이면 재생성 기능 비활성)
         manual_text: str = "",       # 재생성 컨텍스트
+        run_dir=None,                # D58 — 스크린샷 조회용 run 디렉토리
     ):
         super().__init__(parent)
         self.setWindowTitle("Stage 4 — Reviewer Gate")
@@ -236,6 +237,7 @@ class ReviewerGate(QDialog):
         self._reviewer_id = reviewer_id
         self._llm = llm_client
         self._manual_text = manual_text
+        self._run_dir = run_dir
         self._regen_worker: _RegenerateWorker | None = None
         self._bucket_filter: str | None = None      # D57 — None=전체, 'red'/'yellow'/'green'
         self._row_to_idx: list[int] = []             # 표 행 → self._tcs 인덱스 매핑(필터 대응)
@@ -372,7 +374,8 @@ class ReviewerGate(QDialog):
         t_hdr_lay.setContentsMargins(14, 0, 14, 0)
         t_hdr_lay.addWidget(QLabel("<b style='color:#1e293b;'>TC 목록</b>"))
         t_hdr_lay.addWidget(
-            QLabel("<span style='color:#94a3b8; font-size:11px;'>더블클릭 → 전체 내용</span>")
+            QLabel("<span style='color:#94a3b8; font-size:11px;'>"
+                   "더블클릭 → 스크린샷·상세  |  키보드: A 승인 · E 수정 · R 거부 · ↑↓ 이동</span>")
         )
         t_hdr_lay.addStretch()
         table_card_lay.addWidget(t_hdr)
@@ -589,12 +592,20 @@ class ReviewerGate(QDialog):
         self._note_edit.blockSignals(False)
 
     def _on_double_click(self, row: int, _col: int) -> None:
-        """더블클릭 → TC 전체 내용 팝업."""
-        tc = self._tc_at(row)
-        if tc is None:
+        """더블클릭 → TC 상세(스크린샷·전후이동·키보드, D58: failure_detail 재사용)."""
+        if not (0 <= row < len(self._row_to_idx)):
             return
-        dlg = _TcDetailDialog(tc, parent=self)
-        dlg.exec()
+        idx = self._row_to_idx[row]
+        try:
+            from app.ui.failure_detail import FailureDetailDialog
+            dlg = FailureDetailDialog(
+                tcs=self._tcs, index=idx, run_dir=self._run_dir, parent=self
+            )
+            dlg.exec()
+        except Exception:
+            # 폴백: 기존 단순 팝업
+            dlg = _TcDetailDialog(self._tcs[idx], parent=self)
+            dlg.exec()
 
     def _on_status_changed(self, index: int) -> None:
         row = self._table.currentRow()
@@ -638,6 +649,41 @@ class ReviewerGate(QDialog):
         for tc_id in self._decisions:
             self._decisions[tc_id]["status"] = status
         self._load_tcs()   # 표 다시 그려 상태/색 일괄 반영(필터 유지)
+
+    # ── D58: 키보드 단축키 (A/E/R 결정 + ←/→ 행 이동) ────────────────────────
+    def keyPressEvent(self, event) -> None:
+        key = event.key()
+        # 노트 편집 중에는 단축키 비활성(텍스트 입력 우선)
+        if self._note_edit.hasFocus():
+            super().keyPressEvent(event)
+            return
+        key_map = {Qt.Key_A: "approved", Qt.Key_E: "edited", Qt.Key_R: "rejected"}
+        if key in key_map:
+            self._set_current_status(key_map[key])
+        elif key in (Qt.Key_Right, Qt.Key_Down):
+            self._move_row(+1)
+        elif key in (Qt.Key_Left, Qt.Key_Up):
+            self._move_row(-1)
+        else:
+            super().keyPressEvent(event)
+
+    def _set_current_status(self, status: str) -> None:
+        """현재 선택 행에 결정 적용 후 다음 행으로 이동(빠른 검토 동선)."""
+        row = self._table.currentRow()
+        tc = self._tc_at(row)
+        if tc is None:
+            return
+        tc_id = tc.get("tc_id", "")
+        if tc_id in self._decisions:
+            self._decisions[tc_id]["status"] = status
+        self._apply_current()
+        self._move_row(+1)
+
+    def _move_row(self, delta: int) -> None:
+        row = self._table.currentRow()
+        new = max(0, min(self._table.rowCount() - 1, row + delta))
+        if new != row:
+            self._table.setCurrentCell(new, self._table.currentColumn() if self._table.currentColumn() >= 0 else 0)
 
     # ── D57: 버킷 필터 + 버킷 일괄 승인 ──────────────────────────────────────
     def _set_bucket_filter(self, key: str) -> None:

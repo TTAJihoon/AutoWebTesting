@@ -178,6 +178,7 @@ def main() -> None:
                     tcs=tcs, reviewer_id=username, parent=pv,
                     llm_client=pv._orch.llm,
                     manual_text=manual_text,
+                    run_dir=getattr(pv._orch, "run_dir", None),   # D58 — 스크린샷 조회
                 )
                 gate.decisions_ready.connect(pv.apply_gate)
                 gate.tcs_regenerated.connect(_on_tcs_regenerated)
