@@ -17,6 +17,7 @@ AWT 프로젝트의 **모든 설계 결정의 단일 출처**. 구현은 이 문
 | 7 | [07-llm-providers.md](07-llm-providers.md) | LLM provider 추상화 (Anthropic/OpenAI/Gemini) | 02 보완 |
 | 8 | [08-feature-list-refinement.md](08-feature-list-refinement.md) | 기능 리스트 정제 & 확정 게이트 (로그인 편중 해소, D51~D53) | 03 보완 |
 | 9 | [09-tc-grouping-and-performance.md](09-tc-grouping-and-performance.md) | TC 그룹핑 & 파이프라인 성능 (생성 6.9h→<1h, D54~D56) | 03 보완 |
+| 10 | [10-reviewer-gate-v2.md](10-reviewer-gate-v2.md) | Reviewer Gate v2 (검토 부담↓·가독성↑, D57~D58) | 03 보완 |
 | — | [AWT_장점분석.md](AWT_장점분석.md) | 기본 접근법(LLM 직접 요청) 대비 AWT 장점 — 항목별 상세 분석 | 소개·발표용 |
 
 ---
