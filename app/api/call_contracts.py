@@ -45,6 +45,7 @@ def load(contract_id: str) -> Contract:
         "DOM_SPEC":        "dom_spec",
         "TC_DESIGN":       "tc_design",
         "TC_DESIGN_GROUP": "tc_design_group",
+        "TC_FLOW":         "tc_flow",
         "TC_REGEN":        "tc_regen",
         "FAILURE_ANALYSIS":"failure_analysis",
         "PATTERN_EXTRACT": "pattern_extract",

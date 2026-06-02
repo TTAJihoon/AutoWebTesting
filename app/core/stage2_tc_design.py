@@ -54,6 +54,84 @@ _CONFIDENCE_ORDER = {"HIGH": 0, "MID": 1, "INFERRED": 2, "": 3}
 
 # D54 — 그룹(페이지)당 한 번에 설계할 leaf 최대 수 (토큰 예산 보호)
 _GROUP_CAP = 12
+# D54-B — 교차 페이지 시나리오 TC 상한 + 도메인당 요약 기능명 수
+_MAX_FLOWS = 15
+_FLOW_NAMES_PER_DOMAIN = 15
+
+
+def _build_site_summary(leaves: list[dict], names_per_domain: int = _FLOW_NAMES_PER_DOMAIN) -> str:
+    """도메인(대분류)별 기능명 요약 — 교차 플로우 설계 입력(이름만, 분량 작게)."""
+    dom: "OrderedDict[str, list[str]]" = OrderedDict()
+    for lf in leaves:
+        maj = lf.get("category_major", "") or "기타"
+        nm = f"{lf.get('category_mid','')}>{lf.get('category_leaf','')}".strip(">")
+        if not nm:
+            continue
+        dom.setdefault(maj, [])
+        if nm not in dom[maj]:
+            dom[maj].append(nm)
+    lines = []
+    for maj, names in dom.items():
+        shown = names[:names_per_domain]
+        extra = f" 외 {len(names) - len(shown)}개" if len(names) > len(shown) else ""
+        lines.append(f"[{maj}] " + ", ".join(shown) + extra)
+    return "\n".join(lines)
+
+
+def _design_cross_flows(leaves: list[dict], llm_client, _cb) -> list[dict]:
+    """D54-B — 사이트 전체 요약으로 교차 페이지 사용자 여정 TC 설계."""
+    if not leaves:
+        return []
+    summary = _build_site_summary(leaves)
+    _cb(f"교차 페이지 시나리오 설계 (최대 {_MAX_FLOWS}개)…")
+    try:
+        result = llm_client.call("TC_FLOW", {
+            "site_summary": summary,
+            "max_journeys": str(_MAX_FLOWS),
+        })
+    except Exception as e:
+        _cb(f"⚠ 교차 플로우 설계 실패(건너뜀): {str(e).splitlines()[0][:150]}")
+        return []
+
+    flows = result.get("flows") or result.get("tcs") or []
+    out: list[dict] = []
+    for i, fl in enumerate(flows[:_MAX_FLOWS], 1):
+        steps = fl.get("steps", "")
+        if isinstance(steps, list):
+            steps = "\n".join(
+                s if str(s).strip().startswith(tuple("0123456789"))
+                else f"{j}. {s}"
+                for j, s in enumerate(steps, 1)
+            )
+        scenario = (fl.get("scenario", "") or fl.get("title", "")).strip()
+        if steps:
+            scenario = (scenario + "\n" + str(steps)).strip()
+        involved = fl.get("involved_features", [])
+        if isinstance(involved, list):
+            involved = ", ".join(str(x) for x in involved)
+        out.append({
+            "tc_id":           f"TC-FLOW-{i:03d}",
+            "대분류":          "교차 시나리오",
+            "중분류":          "사용자 여정",
+            "소분류":          fl.get("title", "") or f"여정 {i}",
+            "requirement_id":  f"FLOW-{i:03d}",
+            "scenario":        scenario,
+            "precondition":    fl.get("precondition", ""),
+            "expected":        fl.get("expected_output", "") or fl.get("expected", ""),
+            "design_technique": "cross_feature",
+            "negative_category": None,
+            "source_quote":    (f"INFERRED: 교차 페이지 여정 (연계 기능: {involved})"
+                                 if involved else "INFERRED: 교차 페이지 여정"),
+            "gen_confidence":  fl.get("gen_confidence", 0.5),
+            "applied_invariant": None,
+            "related_defect_id": None,
+            "screenshot_file": "",
+            "review_status": "pending", "reviewer_note": "", "reviewer_id": "",
+            "actual": "", "result": "not_executed", "failure_reason": "",
+            "exec_confidence": 0.0, "failure_category": "", "failure_category_source": "",
+        })
+    _cb(f"교차 페이지 시나리오 TC {len(out)}개 생성")
+    return out
 
 
 def _prioritize_leaves(leaves: list[dict], max_leaves: int) -> list[dict]:
@@ -250,6 +328,10 @@ def design(
                 gi = 1
             leaf_num, leaf = members[gi - 1]
             all_tcs.append(_finalize(tc, leaf, leaf_num))
+
+    # ── D54-B: 교차 페이지 시나리오(cross_feature) 패스 ─────────────────────
+    if leaves and not (should_stop and should_stop()):
+        all_tcs.extend(_design_cross_flows(leaves, llm_client, _cb))
 
     if failed_leaves:
         _cb(
