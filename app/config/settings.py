@@ -137,26 +137,27 @@ def save_api_key(api_key: str, provider: str | None = None) -> None:
 def load_api_key(provider: str | None = None) -> str | None:
     """provider의 API 키 로드. provider 미지정 시 현재 활성 provider 키 반환.
 
-    .env 환경변수가 있으면 그쪽이 우선:
-        ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY
+    우선순위: UI 저장(암호화 파일) > 환경변수(.env / 시스템)
+    UI에서 저장한 키가 항상 우선 적용된다. 재시작 후에도 유지됨.
+    환경변수는 UI 저장 키가 없을 때만 폴백으로 사용.
     """
     provider = provider or get_active_provider()
     if provider not in VALID_PROVIDERS:
         return None
 
-    # 환경변수 우선
+    # 1순위: UI에서 저장한 암호화 파일 (재시작 후에도 유지)
+    data = _load_payload()
+    stored = data.get(_KEY_FIELD[provider])
+    if stored:
+        return stored
+
+    # 2순위: 환경변수 폴백 (.env 또는 시스템 환경변수)
     env_var = {
         "anthropic": "ANTHROPIC_API_KEY",
         "openai": "OPENAI_API_KEY",
         "google": "GOOGLE_API_KEY",
     }[provider]
-    env_val = os.environ.get(env_var, "").strip()
-    if env_val:
-        return env_val
-
-    # 암호화 저장소
-    data = _load_payload()
-    return data.get(_KEY_FIELD[provider]) or None
+    return os.environ.get(env_var, "").strip() or None
 
 
 def get_provider_model(provider: str | None = None) -> str:
