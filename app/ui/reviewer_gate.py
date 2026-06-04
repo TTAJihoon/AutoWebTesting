@@ -480,8 +480,13 @@ class ReviewerGate(QDialog):
         self._note_edit.textChanged.connect(self._on_note_changed)
         body_lay.addWidget(self._note_edit)
 
-        apply_btn = QPushButton("이 TC에 적용")
+        apply_btn = QPushButton("✔ 결정 적용 (상태·노트 → 테이블 반영)")
         apply_btn.setFixedHeight(36)
+        apply_btn.setToolTip(
+            "현재 상태와 검토 노트를 왼쪽 테이블에 시각적으로 반영합니다.\n"
+            "※ 상태·노트는 입력하는 즉시 자동 저장됩니다.\n"
+            "최종 확정은 하단 '결정 완료 → Stage 5 진행' 버튼을 누르세요."
+        )
         apply_btn.setStyleSheet(
             "QPushButton { background: #3b82f6; color: #ffffff; border-radius: 6px;"
             " font-size: 13px; font-weight: 600; border: none; }"
@@ -489,6 +494,12 @@ class ReviewerGate(QDialog):
         )
         apply_btn.clicked.connect(self._apply_current)
         body_lay.addWidget(apply_btn)
+
+        auto_save_label = QLabel("💾 상태·노트는 입력 즉시 자동 저장됩니다.")
+        auto_save_label.setStyleSheet(
+            "QLabel { color: #94a3b8; font-size: 11px; padding: 2px 0; }"
+        )
+        body_lay.addWidget(auto_save_label)
         body_lay.addStretch()
 
         detail_card_lay.addWidget(detail_body, stretch=1)
