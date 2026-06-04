@@ -121,17 +121,31 @@ class _PreGateWorker(QThread):
         try:
             if not self._resume_from_stage2:
                 feature_spec = None
-                if not self._has_files:
-                    if self._reuse_stage0:
-                        # 기존 분석 결과 로드 — DOM 재스캔/페이지선택 생략
-                        feature_spec = self._orch.load_stage0_draft()
-                        if feature_spec is None:
-                            feature_spec = self._orch.run_stage0()
-                    else:
+                has_url = bool(self._orch.config.target_url)
+
+                # Stage 0 실행 조건:
+                # 1) 매뉴얼 파일 없이 URL만 있을 때 (원래 동작)
+                # 2) 매뉴얼 파일이 있더라도 URL이 있으면 스크린샷/DOM 수집 실행
+                #    (매뉴얼+URL 동시 사용 시에도 스크린샷이 저장되어야 하므로)
+                should_run_stage0 = has_url and not self._reuse_stage0 and not self._orch.has_stage0_draft()
+                should_reuse_stage0 = has_url and self._reuse_stage0
+
+                if should_reuse_stage0:
+                    # 기존 분석 결과 로드 — DOM 재스캔/페이지선택 생략
+                    feature_spec = self._orch.load_stage0_draft()
+                    if feature_spec is None:
                         feature_spec = self._orch.run_stage0()
                     if self._orch.is_stopped():
                         self.stopped.emit([]); return
                     self.stage_done.emit(1)
+                elif should_run_stage0:
+                    feature_spec = self._orch.run_stage0()
+                    if self._orch.is_stopped():
+                        self.stopped.emit([]); return
+                    self.stage_done.emit(1)
+                elif not self._has_files:
+                    # URL도 없고 파일도 없는 경우 (비정상) — 기존 동작 유지
+                    pass
                 self._orch.run_stage1(feature_spec)
                 if self._orch.is_stopped():
                     self.stopped.emit([]); return
