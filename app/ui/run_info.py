@@ -13,7 +13,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTabWidget,
     QTableWidget, QTableWidgetItem, QHeaderView, QTreeWidget, QTreeWidgetItem,
-    QWidget, QFileDialog, QMessageBox, QLineEdit,
+    QWidget, QFileDialog, QMessageBox, QLineEdit, QSplitter,
 )
 
 # meta.json에서 보여줄 설정 (key, 한글 라벨)
@@ -70,6 +70,9 @@ class RunInfoDialog(QDialog):
 
         tabs = QTabWidget()
         tabs.addTab(self._build_settings_tab(), "⚙ 설정")
+        sel_urls = self._meta.get("selected_urls") or []
+        tabs.addTab(self._build_pages_tab(),
+                    f"🗂 페이지 선택 ({len(sel_urls)}개)")
         tabs.addTab(self._build_features_tab(),
                     f"🧩 수집 페이지·요소 ({len(self._features)}개)")
         root.addWidget(tabs, stretch=1)
@@ -130,6 +133,115 @@ class RunInfoDialog(QDialog):
             tbl.setItem(r, 1, QTableWidgetItem(
                 f"{cov.get('coverage_pct','?')}% (기능 {cov.get('designed_features','?')}/{cov.get('total_unique_features','?')}, TC {cov.get('total_tcs','?')})"))
         lay.addWidget(tbl)
+        return w
+
+    # ── 페이지 선택 탭 ───────────────────────────────────────────────────
+    def _build_pages_tab(self) -> QWidget:
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setSpacing(6)
+
+        selected_urls: list[str] = self._meta.get("selected_urls") or []
+        url_groups: dict[str, list[str]] = self._meta.get("selected_url_groups") or {}
+        dom_cache: list[str] = self._meta.get("dom_cache_used") or []
+        cache_set = set(dom_cache)
+
+        # ── 요약 헤더 ──────────────────────────────────────────────────
+        grouped_count = sum(len(v) for v in url_groups.values())
+        cached_count  = sum(1 for u in selected_urls if u in cache_set)
+        summary = (
+            f"선택 페이지: {len(selected_urls)}개"
+            + (f"  |  ♻ 캐시 재사용: {cached_count}개" if cached_count else "")
+            + (f"  |  🧹 동형 묶음: {grouped_count}개 제외" if grouped_count else "")
+        )
+        hdr = QLabel(summary)
+        hdr.setStyleSheet("font-weight: 600; color: #1e293b; padding: 2px 0;")
+        lay.addWidget(hdr)
+
+        # ── Splitter: 선택 URL 목록(위) + 동형 그룹(아래) ──────────────
+        splitter = QSplitter(Qt.Vertical)
+
+        # ── 선택된 URL 목록 ────────────────────────────────────────────
+        top = QWidget()
+        top_lay = QVBoxLayout(top)
+        top_lay.setContentsMargins(0, 0, 0, 0)
+        top_lay.setSpacing(4)
+        top_lay.addWidget(QLabel(f"▸ 분석 대상으로 선택된 페이지 ({len(selected_urls)}개)"))
+
+        url_tbl = QTableWidget(0, 3)
+        url_tbl.setHorizontalHeaderLabels(["URL", "캐시", "동형 대표"])
+        url_tbl.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        url_tbl.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        url_tbl.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        url_tbl.setEditTriggers(QTableWidget.NoEditTriggers)
+        url_tbl.verticalHeader().setVisible(False)
+        url_tbl.setAlternatingRowColors(True)
+
+        repr_set = set(url_groups.keys())  # 대표 URL 집합
+        for url in selected_urls:
+            r = url_tbl.rowCount(); url_tbl.insertRow(r)
+            url_tbl.setItem(r, 0, QTableWidgetItem(url))
+            cache_item = QTableWidgetItem("♻ 캐시" if url in cache_set else "🆕 분석")
+            cache_item.setTextAlignment(Qt.AlignCenter)
+            url_tbl.setItem(r, 1, cache_item)
+            if url in repr_set:
+                n = len(url_groups[url])
+                repr_item = QTableWidgetItem(f"대표 (+{n}개 묶음)")
+                repr_item.setTextAlignment(Qt.AlignCenter)
+                repr_item.setForeground(Qt.darkGreen)
+            else:
+                repr_item = QTableWidgetItem("—")
+                repr_item.setTextAlignment(Qt.AlignCenter)
+            url_tbl.setItem(r, 2, repr_item)
+
+        top_lay.addWidget(url_tbl)
+        splitter.addWidget(top)
+
+        # ── 동형(유사) 페이지 그룹 ─────────────────────────────────────
+        if url_groups:
+            bot = QWidget()
+            bot_lay = QVBoxLayout(bot)
+            bot_lay.setContentsMargins(0, 0, 0, 0)
+            bot_lay.setSpacing(4)
+            total_excluded = sum(len(v) for v in url_groups.values())
+            bot_lay.addWidget(QLabel(
+                f"▸ 동형 페이지 묶음 — {len(url_groups)}개 그룹 "
+                f"({total_excluded}개 페이지가 대표로 묶여 TC 설계에서 제외됨)"
+            ))
+
+            grp_tree = QTreeWidget()
+            grp_tree.setColumnCount(2)
+            grp_tree.setHeaderLabels(["URL", "구분"])
+            grp_tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
+            grp_tree.header().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+
+            for repr_url, similar_urls in url_groups.items():
+                parent = QTreeWidgetItem(grp_tree)
+                parent.setText(0, repr_url)
+                parent.setText(1, f"대표 (+{len(similar_urls)}개)")
+                parent.setForeground(1, Qt.darkGreen)
+                parent.setExpanded(False)
+                for sim_url in similar_urls:
+                    child = QTreeWidgetItem(parent)
+                    child.setText(0, f"  ↳  {sim_url}")
+                    child.setText(1, "동형 (제외)")
+                    child.setForeground(1, Qt.gray)
+
+            bot_lay.addWidget(grp_tree)
+            splitter.addWidget(bot)
+            splitter.setSizes([350, 250])
+        else:
+            splitter.setSizes([600])
+
+        lay.addWidget(splitter, stretch=1)
+
+        if not selected_urls:
+            lay.addWidget(QLabel(
+                "ℹ 페이지 선택 정보가 없습니다.\n"
+                "(Stage 0 DOM 스캔을 실행하지 않았거나 자동 진행 모드였습니다.)"
+            ))
+
         return w
 
     # ── 수집 페이지·요소 탭 ───────────────────────────────────────────────
