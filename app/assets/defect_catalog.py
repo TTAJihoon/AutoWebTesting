@@ -79,7 +79,7 @@ def approve_pattern(
     defect = load_defect(defect_id, product_type_id)
     if not defect:
         return False
-    proposal = defect.get("learning", {}).get("patternProposal")
+    proposal = (defect.get("learning") or {}).get("patternProposal")
     if not proposal:
         return False
 
@@ -123,12 +123,15 @@ def search_similar_defects(
     candidates: list[dict] = []
     for ptype in product_type_ids:
         for defect in list_defects(ptype):
-            if defect.get("feature", {}).get("featureType") == feature_type:
+            if (defect.get("feature") or {}).get("featureType") == feature_type:
                 candidates.append(defect)
-            elif defect.get("learning", {}).get("patternProposal", {}).get("status") == "approved":
-                applies_to = defect["learning"]["patternProposal"].get("appliesTo", [])
-                if feature_type in applies_to:
-                    candidates.append(defect)
+            else:
+                learning = defect.get("learning") or {}
+                pattern = learning.get("patternProposal") or {}
+                if pattern.get("status") == "approved":
+                    applies_to = pattern.get("appliesTo") or []
+                    if feature_type in applies_to:
+                        candidates.append(defect)
 
     # 중복 제거 (defectId 기준)
     seen: set[str] = set()
@@ -150,7 +153,7 @@ def format_for_llm(defects: list[dict], max_chars: int = 1500) -> str:
         return ""
     lines: list[str] = []
     for d in defects:
-        proposal = d.get("learning", {}).get("patternProposal", {})
+        proposal = (d.get("learning") or {}).get("patternProposal") or {}
         checks = proposal.get("checks", [])
         lines.append(f"[{d['defectId']}] {d['title']}")
         lines.append(f"  현상: {d['observedBehavior']}")

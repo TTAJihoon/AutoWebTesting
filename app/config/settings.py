@@ -41,6 +41,13 @@ _KEY_FIELD = {
     "google": "google_key",
 }
 
+# provider별 기본 모델 (사용자가 설정 탭에서 변경 가능)
+DEFAULT_MODELS: dict[str, str] = {
+    "anthropic": "claude-sonnet-4-6",
+    "openai":    "gpt-4o",
+    "google":    "gemini-2.5-flash",
+}
+
 
 def _machine_key() -> bytes:
     """머신 고유값(MAC + hostname)으로 32바이트 Fernet 키 파생."""
@@ -105,6 +112,13 @@ def set_active_provider(provider: str) -> None:
     os.environ["LLM_PROVIDER"] = provider
 
 
+_ENV_KEY_VAR = {
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openai":    "OPENAI_API_KEY",
+    "google":    "GOOGLE_API_KEY",
+}
+
+
 def save_api_key(api_key: str, provider: str | None = None) -> None:
     """provider의 API 키 저장. provider 미지정 시 현재 활성 provider에 저장."""
     provider = provider or get_active_provider()
@@ -115,7 +129,8 @@ def save_api_key(api_key: str, provider: str | None = None) -> None:
     # 활성 provider도 갱신 (UI에서 키 저장은 보통 그 provider를 쓴다는 의미)
     data["active_provider"] = provider
     _save_payload(data)
-    # UI에서 키를 저장하면 그 provider로 전환하겠다는 의미 — env도 갱신
+    # 환경변수도 즉시 갱신 — 기존 시스템 환경변수가 우선순위를 빼앗지 못하도록
+    os.environ[_ENV_KEY_VAR[provider]] = api_key
     os.environ["LLM_PROVIDER"] = provider
 
 
@@ -144,6 +159,22 @@ def load_api_key(provider: str | None = None) -> str | None:
     return data.get(_KEY_FIELD[provider]) or None
 
 
+def get_provider_model(provider: str | None = None) -> str:
+    """provider의 기본 모델 반환. 사용자가 저장한 값 우선, 없으면 내장 기본값."""
+    provider = provider or get_active_provider()
+    data = _load_payload()
+    return data.get(f"{provider}_model") or DEFAULT_MODELS.get(provider, "")
+
+
+def set_provider_model(provider: str, model: str) -> None:
+    """provider의 기본 모델 저장."""
+    if provider not in VALID_PROVIDERS:
+        raise ValueError(f"Unknown provider: {provider}")
+    data = _load_payload()
+    data[f"{provider}_model"] = model
+    _save_payload(data)
+
+
 def delete_api_key(provider: str | None = None) -> None:
     """provider의 API 키만 삭제. 다른 provider 키와 active_provider는 보존."""
     provider = provider or get_active_provider()
@@ -152,3 +183,5 @@ def delete_api_key(provider: str | None = None) -> None:
     data = _load_payload()
     data.pop(_KEY_FIELD[provider], None)
     _save_payload(data)
+    # 환경변수에서도 제거
+    os.environ.pop(_ENV_KEY_VAR.get(provider, ""), None)

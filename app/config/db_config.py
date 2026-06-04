@@ -39,3 +39,13 @@ class DBConfig:
             f"host={self.host} port={self.port} dbname={self.dbname} "
             f"user={self.user} password={self.password}"
         )
+
+    def connect_kwargs(self) -> dict:
+        return {
+            "host": self.host,
+            "port": self.port,
+            "dbname": self.dbname,
+            "user": self.user,
+            "password": self.password,
+            "client_encoding": "UTF8",
+        }

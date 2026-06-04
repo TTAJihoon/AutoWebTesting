@@ -149,7 +149,21 @@ def _run_auth(page: Page, auth_sequence: list[dict]) -> None:
         if action == "goto":
             page.goto(step["url"], wait_until="networkidle")
         elif action == "fill":
-            page.fill(step["selector"], step["value"])
+            selector = step["selector"]
+            value = step.get("value", "")
+            # submit/button 타입은 fill 불가 → click으로 자동 전환
+            el = page.query_selector(selector)
+            el_type = ""
+            if el:
+                try:
+                    el_type = (el.get_attribute("type") or "").lower()
+                except Exception:
+                    pass
+            if el_type in ("submit", "button", "reset") or not value:
+                page.click(selector)
+                page.wait_for_load_state("networkidle", timeout=10000)
+            else:
+                page.fill(selector, value)
         elif action == "click":
             page.click(step["selector"])
             page.wait_for_load_state("networkidle", timeout=10000)

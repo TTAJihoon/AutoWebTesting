@@ -134,6 +134,22 @@ class LLMClient:
             or contract.model
         )
 
+        # Active provider 자동 교체:
+        # 명시적 override가 없는 경우, 사용자가 설정 탭에서 선택한 provider와
+        # contract 모델의 provider가 다르면 active provider의 기본 모델로 교체.
+        # 예) active=openai, contract model=claude-sonnet-4-6 → gpt-4o로 교체
+        if not self._model_overrides.get(contract_id) and not self._model_override:
+            try:
+                from app.config.settings import (
+                    get_active_provider, get_provider_model,
+                )
+                active_prov = get_active_provider()
+                natural_prov = provider_name_for_model(effective_model)
+                if active_prov != natural_prov:
+                    effective_model = get_provider_model(active_prov) or effective_model
+            except Exception:
+                pass
+
         # 캐시 키에 model 포함 (다른 모델은 다른 결과 — D48)
         cache_inputs = dict(inputs)
         cache_inputs["__model__"] = effective_model
@@ -145,6 +161,14 @@ class LLMClient:
 
         user_msg = contract.render_user(**inputs)
         provider = self._get_provider(effective_model)
+
+        # 호출 직전 provider/model 진단 로그
+        try:
+            prov_name = provider_name_for_model(effective_model)
+            if self._progress_cb:
+                self._progress_cb(f"[LLM] {contract_id} → {prov_name} / {effective_model}")
+        except Exception:
+            pass
 
         # RPM 스로틀링 — 모델별 최소 간격 적용 (캐시 히트는 제외됨)
         # 동시성(D55): min_interval>0(Gemini 등)은 락으로 간격을 직렬화해 RPM 보존.
@@ -170,6 +194,34 @@ class LLMClient:
         except Exception as e:
             # ── 오류 분류 ───────────────────────────────────────────────────────
             err_str = str(e)
+
+            prov_name = provider_name_for_model(effective_model)
+
+            # 모델 없음(404) — 모델명 오타/미존재
+            if any(code in err_str for code in (
+                "model_not_found", "does not exist", "No such model",
+                "model not found", "invalid_model",
+            )):
+                raise RuntimeError(
+                    f"모델을 찾을 수 없습니다: {effective_model}\n\n"
+                    f"대시보드 → 설정 탭에서 [{prov_name}] 기본 모델을 올바르게 입력해 주세요.\n"
+                    f"  Anthropic 예시 : claude-sonnet-4-6\n"
+                    f"  OpenAI 예시    : gpt-4o, gpt-4o-mini\n"
+                    f"  Google 예시    : gemini-2.5-flash"
+                ) from e
+
+            # 인증 오류(401) — API 키 잘못됨, 재시도 무의미
+            if any(code in err_str for code in (
+                "401", "Incorrect API key", "Invalid API key",
+                "AuthenticationError", "PermissionDeniedError",
+                "API_KEY_INVALID", "invalid_api_key",
+            )):
+                raise RuntimeError(
+                    f"API 키가 올바르지 않습니다.\n"
+                    f"  사용 Provider : {prov_name}\n"
+                    f"  사용 모델     : {effective_model}\n\n"
+                    f"대시보드 → 설정 탭에서 [{prov_name}] API 키를 확인해 주세요."
+                ) from e
 
             # 일일 쿼터 초과(PerDay) — 재시도해도 해결 안 됨, 즉시 중단
             if "429" in err_str and "PerDay" in err_str:

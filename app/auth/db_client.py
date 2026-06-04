@@ -64,7 +64,7 @@ class DBClient:
 
     # ── 연결 ─────────────────────────────────────────────────────────────
     def connect(self) -> None:
-        self._conn = psycopg2.connect(self._cfg.dsn())
+        self._conn = psycopg2.connect(**self._cfg.connect_kwargs())
         self._conn.autocommit = False
 
     def close(self) -> None:

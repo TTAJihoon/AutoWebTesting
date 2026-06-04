@@ -16,6 +16,7 @@ from app.auth.db_client import DBClient
 from app.config.settings import (
     save_api_key, load_api_key, delete_api_key,
     get_active_provider, set_active_provider, VALID_PROVIDERS,
+    get_provider_model, set_provider_model, DEFAULT_MODELS,
 )
 
 # Provider 표시 라벨 (UI용)
@@ -491,10 +492,39 @@ class Dashboard(QMainWindow):
         api_row.addWidget(del_btn)
         lay.addLayout(api_row)
 
+        # ── 기본 모델 ─────────────────────────────────────────────────────
+        lbl_model = QLabel(f"{_PROVIDER_LABELS[current]} 기본 모델")
+        lbl_model.setStyleSheet(
+            "QLabel { font-size: 12px; font-weight: 600; color: #374151;"
+            " background: transparent; border: none; }"
+        )
+        lay.addWidget(lbl_model)
+        self._model_label = lbl_model
+
+        model_row = QHBoxLayout()
+        model_row.setSpacing(8)
+        self._model_edit = QLineEdit(get_provider_model(current) or "")
+        self._model_edit.setPlaceholderText(DEFAULT_MODELS.get(current, ""))
+        self._model_edit.setFixedHeight(36)
+        model_row.addWidget(self._model_edit)
+
+        model_save_btn = QPushButton("저장")
+        model_save_btn.setFixedHeight(36)
+        model_save_btn.setStyleSheet(
+            "QPushButton { border-radius: 6px; padding: 0 14px; font-size: 12px;"
+            " font-weight: 600; height: 36px;"
+            " background: #3b82f6; color: #fff; border: none; }"
+            "QPushButton:hover { background: #2563eb; }"
+        )
+        model_save_btn.clicked.connect(self._save_provider_model)
+        model_row.addWidget(model_save_btn)
+        lay.addLayout(model_row)
+
         # 안내
         hint = QLabel(
-            "Provider별 API 키는 각각 따로 저장됩니다. Provider 전환 시 해당 키만 사용됩니다.\n"
-            "모델은 prompts/*.md 의 model 필드(claude-* / gpt-* / gemini-*)로 결정됩니다."
+            "Provider별 API 키와 기본 모델은 각각 따로 저장됩니다.\n"
+            "Provider를 전환하면 해당 provider의 키와 모델이 자동으로 적용됩니다.\n"
+            "기본 모델을 비워두면 내장 기본값(claude-sonnet-4-6 / gpt-4o / gemini-2.5-flash)을 사용합니다."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet(
@@ -516,15 +546,37 @@ class Dashboard(QMainWindow):
         self._api_show_btn.setText("🙈" if visible else "👁")
 
     def _on_provider_changed(self, index: int) -> None:
-        """Provider 드롭다운 변경 시 — 활성 provider 갱신 + 해당 키 로드."""
+        """Provider 드롭다운 변경 시 — 활성 provider 갱신 + 해당 키/모델 로드."""
         provider = self._provider_combo.itemData(index)
         if not provider:
             return
         set_active_provider(provider)
-        self._api_label.setText(f"{_PROVIDER_LABELS[provider]} API Key")
+        label = _PROVIDER_LABELS[provider]
+        self._api_label.setText(f"{label} API Key")
         self._api_edit.setText(load_api_key(provider) or "")
         self._api_edit.setPlaceholderText(_PROVIDER_PLACEHOLDERS[provider])
-        self.statusBar().showMessage(f"Provider 전환: {_PROVIDER_LABELS[provider]}", 3000)
+        self._model_label.setText(f"{label} 기본 모델")
+        self._model_edit.setText(get_provider_model(provider) or "")
+        self._model_edit.setPlaceholderText(DEFAULT_MODELS.get(provider, ""))
+        self.statusBar().showMessage(f"Provider 전환: {label}", 3000)
+
+    def _save_provider_model(self) -> None:
+        """기본 모델 저장."""
+        provider = self._provider_combo.currentData()
+        model = self._model_edit.text().strip()
+        if not model:
+            # 빈 값이면 저장된 값 삭제 → 내장 기본값으로 복귀
+            from app.config.settings import _load_payload, _save_payload
+            data = _load_payload()
+            data.pop(f"{provider}_model", None)
+            _save_payload(data)
+            self.statusBar().showMessage("기본 모델 초기화 (내장 기본값 사용)", 3000)
+            return
+        try:
+            set_provider_model(provider, model)
+            self.statusBar().showMessage(f"기본 모델 저장: {model}", 3000)
+        except ValueError as e:
+            QMessageBox.warning(self, "저장 실패", str(e))
 
     def _build_users_tab(self) -> QWidget:
         """admin 전용 사용자 관리 탭."""
@@ -846,9 +898,24 @@ class Dashboard(QMainWindow):
             QMessageBox.warning(self, "경고", "API Key가 비어있습니다.")
             return
         save_api_key(key, provider=provider)
-        self.statusBar().showMessage(
-            f"{_PROVIDER_LABELS[provider]} API Key 저장 완료", 3000
+        # 저장 확인 — 실제로 읽혀지는지 검증
+        saved = load_api_key(provider)
+        if saved != key:
+            QMessageBox.critical(
+                self, "저장 실패",
+                "API Key 저장 중 오류가 발생했습니다.\n다시 시도해 주세요."
+            )
+            return
+        label = _PROVIDER_LABELS[provider]
+        masked = key[:8] + "..." + key[-4:]
+        QMessageBox.information(
+            self, "저장 완료",
+            f"{label} API Key가 저장되었습니다.\n\n"
+            f"  Provider : {label}\n"
+            f"  Key      : {masked}\n\n"
+            "다음 실행부터 적용됩니다."
         )
+        self.statusBar().showMessage(f"{label} API Key 저장 완료", 3000)
 
     def _delete_api_key(self) -> None:
         provider = self._provider_combo.currentData()

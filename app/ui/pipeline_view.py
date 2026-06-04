@@ -673,6 +673,33 @@ class PipelineView(QMainWindow):
         self._feature_csv_btn.clicked.connect(self._export_features_csv)
         bot_lay.addWidget(self._feature_csv_btn)
 
+        # 완료 후 결과 열기 버튼들 (Stage 7 완료 시 표시)
+        self._open_report_btn = QPushButton("📊 보고서 열기")
+        self._open_report_btn.setVisible(False)
+        self._open_report_btn.setStyleSheet(
+            "QPushButton {"
+            " background-color: #16a34a; color: #ffffff;"
+            " border: none; border-radius: 6px;"
+            " padding: 6px 14px; font-size: 12px; font-weight: 600; }"
+            "QPushButton:hover { background-color: #15803d; }"
+        )
+        self._open_report_btn.setToolTip("tc_final.xlsx 보고서를 엽니다")
+        self._open_report_btn.clicked.connect(self._open_final_report)
+        bot_lay.addWidget(self._open_report_btn)
+
+        self._open_folder_btn = QPushButton("📁 결과 폴더")
+        self._open_folder_btn.setVisible(False)
+        self._open_folder_btn.setStyleSheet(
+            "QPushButton {"
+            " background-color: #ffffff; color: #475569;"
+            " border: 1px solid #cbd5e1; border-radius: 6px;"
+            " padding: 6px 12px; font-size: 12px; font-weight: 600; }"
+            "QPushButton:hover { background-color: #f1f5f9; color: #1e293b; }"
+        )
+        self._open_folder_btn.setToolTip("실행 결과 폴더를 탐색기로 엽니다")
+        self._open_folder_btn.clicked.connect(self._open_run_folder)
+        bot_lay.addWidget(self._open_folder_btn)
+
         # 스크린샷 폴더 열기 버튼
         self._screenshot_dir_btn = QPushButton("📂 스크린샷 폴더")
         self._screenshot_dir_btn.setVisible(False)
@@ -1198,6 +1225,7 @@ class PipelineView(QMainWindow):
         self._refresh_tc_table()
         self._write_meta("done")
         self._append_log(f"완료 → {out}")
+        self._final_report_path = out
 
         passed = sum(1 for tc in self._tcs if tc.get("result") == "pass")
         failed = sum(1 for tc in self._tcs if tc.get("result") == "fail")
@@ -1206,18 +1234,67 @@ class PipelineView(QMainWindow):
             f"완료  |  통과 {passed}  실패 {failed}  /  총 {total}개", active=True
         )
 
-        # 시스템 트레이 알림 (사용자가 다른 작업 중이어도 인지 가능)
+        # 완료 후 결과 버튼 표시
+        self._open_report_btn.setVisible(True)
+        self._open_folder_btn.setVisible(True)
+
+        # 시스템 트레이 알림
         self._notify(
             "AWT 실행 완료",
             f"총 {total}개  ·  통과 {passed} / 실패 {failed}",
             icon_type="warning" if failed > 0 else "info",
         )
 
-        QMessageBox.information(
-            self, "실행 완료",
-            f"tc_final.xlsx 생성 완료\n\n"
-            f"총 {total}개  PASS {passed}  FAIL {failed}\n\n{out}"
+        # 완료 팝업 — 보고서 바로 열기 버튼 포함
+        run_dir = self._orch.run_dir
+        screenshots_dir = run_dir / "dom-scan" / "screenshots"
+        screenshot_info = (
+            f"\n📷 스크린샷 : {screenshots_dir}" if screenshots_dir.exists() else ""
         )
+        msg = QMessageBox(self)
+        msg.setWindowTitle("실행 완료")
+        msg.setIcon(QMessageBox.Information)
+        msg.setText(
+            f"<b>모든 단계가 완료되었습니다.</b><br><br>"
+            f"총 {total}개 &nbsp;·&nbsp; "
+            f"<span style='color:#16a34a'>PASS {passed}</span> &nbsp;/&nbsp; "
+            f"<span style='color:#dc2626'>FAIL {failed}</span>"
+        )
+        msg.setInformativeText(
+            f"📊 보고서 : {out}"
+            f"\n📁 결과 폴더 : {run_dir}"
+            f"{screenshot_info}"
+        )
+        open_btn  = msg.addButton("📊 보고서 열기", QMessageBox.AcceptRole)
+        folder_btn = msg.addButton("📁 폴더 열기",  QMessageBox.ActionRole)
+        msg.addButton("닫기", QMessageBox.RejectRole)
+        msg.exec()
+        clicked = msg.clickedButton()
+        if clicked == open_btn:
+            self._open_final_report()
+        elif clicked == folder_btn:
+            self._open_run_folder()
+
+    # ── 완료 후 결과 열기 ─────────────────────────────────────────────────────
+    def _open_final_report(self) -> None:
+        """tc_final.xlsx를 기본 프로그램으로 엽니다."""
+        import subprocess
+        path = getattr(self, "_final_report_path", None) or (
+            self._orch.run_dir / "tc_final.xlsx"
+        )
+        if not path.exists():
+            QMessageBox.warning(self, "파일 없음", f"보고서 파일을 찾을 수 없습니다:\n{path}")
+            return
+        subprocess.Popen(["explorer", str(path)])
+
+    def _open_run_folder(self) -> None:
+        """실행 결과 폴더를 탐색기로 엽니다."""
+        import subprocess
+        folder = self._orch.run_dir
+        if not folder.exists():
+            QMessageBox.warning(self, "폴더 없음", f"결과 폴더를 찾을 수 없습니다:\n{folder}")
+            return
+        subprocess.Popen(["explorer", str(folder)])
 
     # ── 기능목록 CSV 다운로드 ─────────────────────────────────────────────────
     def _export_features_csv(self) -> None:
@@ -1336,7 +1413,13 @@ class PipelineView(QMainWindow):
         # 시스템 트레이 알림 (백그라운드 실행 중에도 인지 가능)
         first_line = msg.splitlines()[0][:120] if msg else ""
         self._notify("AWT — 오류 발생", first_line or "실행이 중단되었습니다", "critical")
-        QMessageBox.critical(self, "오류", msg[:800])
+        # 오류 종류별 다이얼로그
+        if "모델을 찾을 수 없습니다" in msg:
+            QMessageBox.critical(self, "모델 오류", msg[:600])
+        elif "API 키가 올바르지 않습니다" in msg:
+            QMessageBox.critical(self, "API 키 오류", msg[:600])
+        else:
+            QMessageBox.critical(self, "오류", msg[:800])
 
     # ── 시스템 트레이 알림 ────────────────────────────────────────────────
     def _notify(
