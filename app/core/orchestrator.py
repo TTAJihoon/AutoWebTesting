@@ -74,6 +74,14 @@ class RunConfig:
     """전역 컴포넌트 판정 임계 — 이 비율 이상 페이지에 동일 셀렉터로 등장하면 전역.
     실측: 로그인 폼이 49.4% 페이지에 등장 → 0.5면 놓침. 0.4로 잡되 고유 콘텐츠는 안전."""
 
+    collapse_nav_links: bool = True
+    """Stage 0 — nav/header/footer/메뉴 컨테이너 내 '순수 이동 링크'를 대표 N개로 축약.
+    네비게이션·메뉴 도메인이 수백 개로 비대해지던 문제(실측 257개/23.8%) 해소.
+    로그인·장바구니·결제·검색 등 중요 액션 링크는 보존. False면 모든 링크 명세(기존 동작)."""
+
+    nav_link_keep: int = 8
+    """축약 시 element 묶음당 유지할 대표 네비게이션 링크 수."""
+
     auto_pages: bool = True
     """True(기본)면 실행 시 페이지 선택 다이얼로그·재사용 프롬프트를 생략하고
     자동으로 새 BFS 스캔을 수행(→ D51 전역dedup·D52 한글 생성 적용). 원클릭 실행.
@@ -182,6 +190,8 @@ class Orchestrator:
             should_stop=self.is_stopped,
             dedup_global_components=self.config.dedup_global_components,
             global_ratio=self.config.global_ratio,
+            collapse_nav_links=self.config.collapse_nav_links,
+            nav_link_keep=self.config.nav_link_keep,
         )
         self._stage = 0
         return result

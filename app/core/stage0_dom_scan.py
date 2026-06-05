@@ -28,6 +28,9 @@ _CHUNK_MAX_RETRY  = 3
 def _extract_elements(page: Page) -> list[dict]:
     return page.evaluate("""() => {
         const tags = ['a','button','input','select','textarea','form','label','h1','h2','h3','nav'];
+        const navSel = 'nav, header, footer, [role="navigation"], [role="menu"],'
+                     + ' #gnb, .gnb, #snb, .snb, #lnb, .lnb, #menu, .menu,'
+                     + ' #header, .header, #footer, .footer, #nav, .nav';
         const results = [];
         for (const tag of tags) {
             for (const el of document.querySelectorAll(tag)) {
@@ -39,6 +42,8 @@ def _extract_elements(page: Page) -> list[dict]:
                 }
                 const text = el.innerText?.trim().substring(0, 80);
                 if (text) obj.text = text;
+                // 네비게이션 컨테이너(헤더/푸터/메뉴) 내부인지 — 순수 이동 링크 축약용
+                try { if (el.closest && el.closest(navSel)) obj.in_nav = true; } catch (e) {}
                 results.push(obj);
             }
         }
@@ -131,6 +136,70 @@ def _detect_global_components(
     return global_sigs, report
 
 
+# ── 네비게이션 링크 축약 (아이디어 1) ────────────────────────────────────────
+# nav/header/footer/메뉴 컨테이너 내 '순수 이동 링크'(텍스트+href만 있고 시험 가치가
+# 낮은 메뉴 항목)는 수십~수백 개가 모두 별도 기능으로 추출되어 네비게이션·메뉴 도메인을
+# 비대하게 만든다(실측 257개/23.8%). 시험 관점에서 "메뉴 이동이 동작한다"는 대표 몇 개로
+# 충분하므로, DOM_SPEC 호출 '전에' 대표 N개만 남기고 축약한다(LLM 호출·기능 수 동시 절감).
+# 단, 로그인·장바구니·결제·검색 등 '중요 액션' 링크는 절대 축약하지 않는다.
+_NAV_LINK_KEEP_DEFAULT = 8
+
+# 순수 네비게이션이 아니라 '기능 액션'으로 보존할 키워드 (텍스트/href/id/aria 부분일치)
+_NAV_KEEP_ACTIONS = (
+    "login", "logout", "join", "register", "signup", "sign-up", "mypage", "my-page",
+    "cart", "wishlist", "order", "checkout", "pay", "search", "write", "delete",
+    "modify", "update", "upload", "download", "reply", "comment", "admin", "password",
+    "로그인", "로그아웃", "가입", "회원", "마이페이지", "장바구니", "위시", "주문",
+    "결제", "검색", "글쓰기", "글 작성", "작성", "등록", "수정", "삭제", "답변",
+    "댓글", "다운로드", "업로드", "관리자", "신고", "비밀번호",
+)
+
+
+def _is_pure_nav_link(el: dict) -> bool:
+    """nav 컨테이너 내 단순 이동 링크인지 — 축약 대상(시험 가치 낮음).
+
+    중요 액션(로그인·장바구니·결제·검색 등) 키워드가 텍스트/href/id/aria에 있으면
+    기능 링크로 보고 축약하지 않는다(보존).
+    """
+    if el.get("tag") != "a" or not el.get("in_nav") or not el.get("href"):
+        return False
+    blob = " ".join(str(el.get(k, "")) for k in ("text", "href", "id", "aria-label")).lower()
+    if any(kw in blob for kw in _NAV_KEEP_ACTIONS):
+        return False
+    return True
+
+
+def _collapse_nav_links(elements: list[dict], keep: int) -> tuple[list[dict], int, list[str]]:
+    """순수 nav 링크를 정규화 텍스트 기준 대표 keep개로 축약.
+
+    Returns:
+        (kept_elements, dropped_count, dropped_samples)
+        — nav가 아닌 요소는 모두 보존. nav 링크는 distinct 텍스트 기준 앞쪽 keep개만 유지.
+    """
+    nav, others = [], []
+    for el in elements:
+        (nav if _is_pure_nav_link(el) else others).append(el)
+
+    seen: dict = {}          # norm_text → kept(el) or None(over-limit, 이후 동일텍스트도 drop)
+    kept_nav: list[dict] = []
+    dropped = 0
+    samples: list[str] = []
+    for el in nav:
+        t = _norm_text(el.get("text", "")) or _norm_text(el.get("href", ""))
+        if t in seen:
+            dropped += 1
+            continue
+        if len(kept_nav) < keep:
+            seen[t] = el
+            kept_nav.append(el)
+        else:
+            seen[t] = None
+            dropped += 1
+            if len(samples) < 10:
+                samples.append((el.get("text", "") or el.get("href", ""))[:40])
+    return others + kept_nav, dropped, samples
+
+
 def _safe_filename(url: str, base_url: str) -> str:
     """URL 경로를 파일명용 안전 문자열로 변환 (최대 40자)."""
     path = url.replace(base_url, "").strip("/") or "home"
@@ -150,6 +219,8 @@ def scan(
     dedup_global_components: bool = True,
     global_ratio: float = _GLOBAL_RATIO_DEFAULT,
     min_pages_for_global: int = _MIN_PAGES_FOR_GLOBAL,
+    collapse_nav_links: bool = True,
+    nav_link_keep: int = _NAV_LINK_KEEP_DEFAULT,
 ) -> dict:
     """URL을 스캔해 feature-spec-draft.md 생성. LLM 명세 초안 반환.
 
@@ -344,11 +415,20 @@ def scan(
                 f"(≥{global_report['threshold_pages']}/{global_report['total_pages']} 페이지 공통) "
                 f"→ 1회만 명세")
 
+    # ── 네비게이션 링크 축약 (아이디어 1) ────────────────────────────────────
+    nav_dropped_total = 0
+    nav_samples: list[str] = []
+
     # 전역 컴포넌트 먼저 명세 (1회)
     if global_elements:
-        gc = _spec_elements(
-            list(global_elements.values()), "__global__", "", "global", "전역"
-        )
+        gv = list(global_elements.values())
+        if collapse_nav_links:
+            gv, gdrop, gsamp = _collapse_nav_links(gv, nav_link_keep)
+            if gdrop:
+                nav_dropped_total += gdrop
+                nav_samples.extend(gsamp)
+                _cb(f"  🧭 전역 네비게이션 링크 {gdrop}개 축약 (대표 {nav_link_keep}개 유지)")
+        gc = _spec_elements(gv, "__global__", "", "global", "전역")
         _cb(f"  전역 컴포넌트 기능 {gc}개 추출")
 
     # 페이지별(전역 제거됨) 명세
@@ -358,11 +438,25 @@ def scan(
             break
         if not ps["elements"]:
             continue
-        _cb(f"명세 중 ({i}/{len(page_specs)}): {ps['url']} — 요소 {len(ps['elements'])}개")
-        pc = _spec_elements(
-            ps["elements"], ps["url"], ps["screenshot"], "page", ps["url"]
-        )
+        els = ps["elements"]
+        if collapse_nav_links:
+            els, pdrop, psamp = _collapse_nav_links(els, nav_link_keep)
+            if pdrop:
+                nav_dropped_total += pdrop
+                if len(nav_samples) < 10:
+                    nav_samples.extend(psamp[: 10 - len(nav_samples)])
+        _cb(f"명세 중 ({i}/{len(page_specs)}): {ps['url']} — 요소 {len(els)}개")
+        pc = _spec_elements(els, ps["url"], ps["screenshot"], "page", ps["url"])
         _cb(f"  페이지 기능 {pc}개 추출")
+
+    nav_collapse_report = {
+        "enabled":        bool(collapse_nav_links),
+        "keep_per_group": nav_link_keep,
+        "dropped":        nav_dropped_total,
+        "dropped_samples": nav_samples[:10],
+    }
+    if nav_dropped_total:
+        _cb(f"🧭 네비게이션 링크 축약 완료 — 총 {nav_dropped_total}개 대표로 압축")
 
     # ── feature 스키마 정규화 ────────────────────────────────────────────────
     # LLM이 category_mid 등을 누락하거나, 구버전 캐시 draft가 다른 스키마일 때
@@ -389,6 +483,7 @@ def scan(
         "llm_errors":    llm_error_count,
         "cache_hits":    cache_hit_count,
         "global_component_report": global_report,   # D51 전역 dedup 결과
+        "nav_collapse_report":     nav_collapse_report,  # 아이디어 1 네비 링크 축약 결과
     }
     spec_path = out_dir / "feature-spec-draft.json"
     spec_path.write_text(json.dumps(draft, ensure_ascii=False, indent=2), encoding="utf-8")
