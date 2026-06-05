@@ -185,15 +185,32 @@ def _refine_leaves(raw_leaves: list[dict]) -> tuple[list[dict], dict]:
 
 
 def _extract_leaves_from_text(text: str) -> list[dict]:
-    """마크다운/텍스트에서 계층형 기능 목록 추출 (휴리스틱)."""
+    """마크다운/텍스트에서 계층형 기능 목록 추출 (휴리스틱).
+
+    헤딩 레벨 자동 보정(off-by-one 방지):
+        일반 매뉴얼은 `#`=대분류 / `##`=중분류 / `###`=소분류로 가정한다.
+        그러나 "# 문서제목 / ## 도메인 / ### 기능" 구조(최상위 `#`이 문서 제목
+        하나뿐)에서는 모든 기능이 같은 대분류(문서 제목)로 뭉쳐 제품 도메인이
+        사라진다. → `#`이 1개뿐이고 `##`이 2개 이상이면 레벨을 한 칸 승격해
+        `##`을 대분류로, `###`을 소분류로 사용한다(중분류는 대분류와 동일).
+    """
+    lines = text.splitlines()
+    n_h1 = sum(1 for l in lines if l.strip().startswith("# "))
+    n_h2 = sum(1 for l in lines if l.strip().startswith("## "))
+    shift = (n_h1 <= 1 and n_h2 >= 2)
+
     leaves: list[dict] = []
-    major = mid = leaf = ""
+    h1 = h2 = ""
     idx = 0
 
-    for line in text.splitlines():
+    for line in lines:
         stripped = line.strip()
         if stripped.startswith("### "):
             leaf = stripped[4:].strip()
+            if shift:
+                major, mid = h2, h2     # ## → 대분류(+중분류)
+            else:
+                major, mid = h1, h2     # 기존 3-레벨 매핑
             if major and mid and leaf:
                 idx += 1
                 leaves.append({
@@ -203,11 +220,10 @@ def _extract_leaves_from_text(text: str) -> list[dict]:
                     "category_leaf": leaf,
                 })
         elif stripped.startswith("## "):
-            mid = stripped[3:].strip()
-            leaf = ""
+            h2 = stripped[3:].strip()
         elif stripped.startswith("# "):
-            major = stripped[2:].strip()
-            mid = leaf = ""
+            h1 = stripped[2:].strip()
+            h2 = ""
 
     # 헤더가 없으면 섹션 전체를 leaf 1개로
     if not leaves and text.strip():

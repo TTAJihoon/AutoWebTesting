@@ -111,6 +111,16 @@ _RULES: list[tuple[str, list[str]]] = [
 ]
 
 
+# 문서 제목/메타 문자열 토큰 — 제품 도메인이 아니다. 통제 어휘 키워드 매칭
+# '전에' 걸러낸다. (예: "그누보드5 기능 명세서 (AWT Stage 1 입력용)"의 '입력'이
+# 폼·입력검증으로 오매칭되어 모든 leaf 대분류가 폼·입력검증으로 붕괴되던 문제 차단.)
+# 토큰은 명백히 문서 메타인 것만 보수적으로 선정(도메인명 오탐 방지).
+_META_TITLE_TOKENS = (
+    "명세서", "기능 명세", "기능명세", "specification",
+    "입력용", "참고문서", "참고 문서", "requirements doc",
+)
+
+
 def coerce_major(name: str) -> tuple[str, str]:
     """대분류명을 통제 어휘로 보정.
 
@@ -124,6 +134,9 @@ def coerce_major(name: str) -> tuple[str, str]:
     if raw in TAXONOMY_SET:
         return raw, "canonical"
     low = raw.lower()
+    # 문서 제목/메타로 보이면 도메인이 아님 → 키워드 매칭 건너뜀(오매칭 방지).
+    if any(tok in low for tok in _META_TITLE_TOKENS):
+        return "기타", "coerced"
     for canonical, keywords in _RULES:
         for kw in keywords:
             if kw and kw in low:
