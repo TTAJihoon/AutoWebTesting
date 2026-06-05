@@ -33,21 +33,28 @@ TAXONOMY: list[str] = [
 ]
 TAXONOMY_SET = set(TAXONOMY)
 
-# 동의어 규칙 — (canonical, [트리거 키워드]) 우선순위 순서대로 평가.
-# 키워드는 소문자 부분일치. 충돌(예: "user interface" vs "user account")을 피하려
-# 더 구체적·중요한 도메인을 앞에 둔다. 인증 도메인을 최우선(사용자 핵심 불만).
-_RULES: list[tuple[str, list[str]]] = [
+# ── 2축 분리 (아이디어 A) ─────────────────────────────────────────────────────
+# taxonomy 12종은 두 직교 축을 섞고 있었다:
+#   - 제품 도메인 축: 회원·인증 / 게시판·콘텐츠 / 검색·필터 / 결제·쇼핑 / 관리자 /
+#                     알림·고객지원 / 정보표시·정책 / 설정·환경
+#   - 상호작용 유형 축: 폼·입력검증 / UI·접근성 / 네비게이션·메뉴
+# 회원가입은 *도메인=회원·인증*이며 동시에 *유형=폼*이라, LLM이 유형을 고르면
+# 대분류가 폼·입력검증으로 붕괴됐다(실측 98/108). 또 메뉴 링크가 네비게이션 도메인으로
+# 257개 뭉쳤다. → 대분류는 '도메인 우선'으로 분류하고, 도메인이 없을 때만 상호작용
+# 유형을 쓴다. leaf·중분류까지 함께 보아 도메인 신호를 최대한 살린다.
+
+# 도메인 규칙 (우선 평가) — 더 구체적·중요한 도메인을 앞에 둔다.
+_DOMAIN_RULES: list[tuple[str, list[str]]] = [
     ("회원·인증", [
         "login", "logout", "log in", "log out", "sign in", "sign out", "signin", "signout",
         "authentication", "auth", "session", "password", "credential", "identity",
         "account", "member", "register", "registration", "sign up", "signup", "profile",
         "my page", "mypage", "my-page", "access control", "security",
-        # "user ..." 도메인은 인증으로 (단 "user interface"는 UI 규칙에서 처리 — 'interface' 미포함)
         "user management", "user account", "user profile", "user personalization",
         "user communication", "user engagement", "user assistance", "user support",
         "user info", "user center",
         "로그인", "로그아웃", "인증", "세션", "비밀번호", "계정", "회원", "가입",
-        "프로필", "마이페이지", "탈퇴", "로그",
+        "프로필", "마이페이지", "탈퇴", "로그", "권한", "보안",
     ]),
     ("결제·쇼핑", [
         "shopping", "shop", "cart", "wishlist", "checkout", "order", "payment", "pay ",
@@ -74,22 +81,26 @@ _RULES: list[tuple[str, list[str]]] = [
     ("관리자", [
         "admin", "administration", "관리자", "운영",
     ]),
+    ("정보표시·정책", [
+        "information", "legal", "policy", "terms", "privacy", "statistics",
+        "analytics", "metrics", "trust",
+        "정책", "약관", "통계", "개인정보", "법적", "안내",
+    ]),
+    ("설정·환경", [
+        "settings", "preference", "configuration", "personalization",
+        "customization", "localization",
+        "설정", "환경", "개인화", "맞춤",
+    ]),
+]
+
+# 상호작용 유형 규칙 (도메인 미매칭 시에만 평가)
+_INTERACTION_RULES: list[tuple[str, list[str]]] = [
     ("UI·접근성", [
         "accessibility", "usability", "responsive", "device", "typography", "readability",
         "user interface", "interface", "ui ", "ui/", "ui:", "ux", "display", "panel",
-        "layout",  # layout은 네비보다 UI로
+        "layout",
         "접근성", "사용성", "반응형", "디바이스", "표시", "가독성",
         "사용자 인터페이스", "사용자인터페이스", "레이아웃", "패널",
-    ]),
-    ("정보표시·정책", [
-        "information", "info", "legal", "policy", "terms", "privacy", "statistics",
-        "analytics", "metrics", "trust",
-        "정보", "정책", "약관", "통계", "개인정보", "법적", "안내",
-    ]),
-    ("설정·환경", [
-        "settings", "setting", "preference", "configuration", "config", "personalization",
-        "customization", "localization",
-        "설정", "환경", "개인화", "맞춤",
     ]),
     ("폼·입력검증", [
         "form", "input", "validation", "submission", "submit",
@@ -100,15 +111,25 @@ _RULES: list[tuple[str, list[str]]] = [
         "footer", "sidebar", "breadcrumb", "site", "page", "web",
         "네비", "메뉴", "탐색", "이동", "헤더", "푸터", "링크", "사이트", "홈",
     ]),
+]
+
+# fallback (도메인·상호작용 모두 미매칭 시) — ISO 품질특성명 오용 등 → 기타
+_FALLBACK_RULES: list[tuple[str, list[str]]] = [
     ("기타", [
         "기타", "other", "misc", "etc", "utility", "utilities", "general", "common",
         "platform", "system", "meta",
-        # LLM이 ISO 품질특성명을 대분류로 오용한 경우(도메인 아님) → 기타로 정규화.
-        # 근본 해소는 프롬프트의 통제 어휘 주입(NEW run). 여기선 legacy 데이터 보정.
         "functional suitability", "functionality", "기능 적합성", "기능적합성",
         "suitability",
     ]),
 ]
+
+DOMAIN_MAJORS = [r[0] for r in _DOMAIN_RULES]
+INTERACTION_MAJORS = [r[0] for r in _INTERACTION_RULES]
+_DOMAIN_SET = set(DOMAIN_MAJORS)
+_INTERACTION_SET = set(INTERACTION_MAJORS)
+
+# 하위호환: 기존 _RULES(도메인→상호작용→fallback 순서)
+_RULES = _DOMAIN_RULES + _INTERACTION_RULES + _FALLBACK_RULES
 
 
 # 문서 제목/메타 문자열 토큰 — 제품 도메인이 아니다. 통제 어휘 키워드 매칭
@@ -121,24 +142,65 @@ _META_TITLE_TOKENS = (
 )
 
 
-def coerce_major(name: str) -> tuple[str, str]:
-    """대분류명을 통제 어휘로 보정.
+def classify_major(name: str, mid: str = "", leaf: str = "") -> tuple[str, str]:
+    """대분류를 '제품 도메인 우선'으로 분류 (2축 분리, 아이디어 A).
+
+    name(대분류)뿐 아니라 mid(중분류)·leaf(소분류)까지 함께 보아 도메인 신호를
+    최대한 살린다. 예) name="폼·입력검증" + leaf="회원가입" → 도메인 '회원·인증' 우선.
+
+    우선순위:
+        1) name이 이미 도메인 통제어휘 → 그대로(canonical)
+        2) leaf+mid+name 전체에서 도메인 키워드 매칭 → 해당 도메인(coerced)
+        3) 문서 메타 문자열 → 기타(coerced)
+        4) name이 상호작용 통제어휘 → 그대로(canonical)
+        5) 상호작용 키워드 매칭 → 해당 유형(coerced)
+        6) fallback 키워드 → 기타(coerced)
+        7) 매칭 실패 → 원본 유지(unknown)
 
     Returns:
         (canonical, status) — status ∈ {"canonical", "coerced", "unknown"}.
-        매칭 실패(unknown) 시 원본을 그대로 돌려준다(정보 손실 0).
     """
     raw = (name or "").strip()
+    if raw in _DOMAIN_SET:
+        return raw, "canonical"
+
+    blob = " ".join([leaf or "", mid or "", raw]).lower()
+
+    # 2) 도메인 우선 (leaf+mid+major 전체 대상)
+    for canon, kws in _DOMAIN_RULES:
+        for kw in kws:
+            if kw and kw in blob:
+                return canon, "coerced"
+
+    # 3) 문서 메타 → 기타 (도메인 신호가 없을 때만 도달)
+    if any(tok in blob for tok in _META_TITLE_TOKENS):
+        return "기타", "coerced"
+
+    # 4) name이 상호작용 통제어휘면 유지
+    if raw in _INTERACTION_SET:
+        return raw, "canonical"
+
+    # 5) 상호작용 매칭
+    for canon, kws in _INTERACTION_RULES:
+        for kw in kws:
+            if kw and kw in blob:
+                return canon, "coerced"
+
+    # 6) fallback
+    for canon, kws in _FALLBACK_RULES:
+        for kw in kws:
+            if kw and kw in blob:
+                return canon, "coerced"
+
     if not raw:
         return "기타", "coerced"
-    if raw in TAXONOMY_SET:
-        return raw, "canonical"
-    low = raw.lower()
-    # 문서 제목/메타로 보이면 도메인이 아님 → 키워드 매칭 건너뜀(오매칭 방지).
-    if any(tok in low for tok in _META_TITLE_TOKENS):
-        return "기타", "coerced"
-    for canonical, keywords in _RULES:
-        for kw in keywords:
-            if kw and kw in low:
-                return canonical, "coerced"
     return raw, "unknown"
+
+
+def coerce_major(name: str) -> tuple[str, str]:
+    """대분류명을 통제 어휘로 보정 (하위호환 래퍼 — classify_major(name)).
+
+    leaf·mid 컨텍스트 없이 대분류명만으로 분류. 신규 코드는 classify_major를 직접 호출해
+    leaf까지 전달하면 도메인 분류 정확도가 높다.
+    """
+    return classify_major(name)

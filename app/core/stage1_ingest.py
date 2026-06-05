@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Callable
 
 from app.tools.file_parser import parse
-from app.core.taxonomy import coerce_major, TAXONOMY_VERSION
+from app.core.taxonomy import classify_major, TAXONOMY_VERSION
 
 
 def ingest(
@@ -146,7 +146,11 @@ def _refine_leaves(raw_leaves: list[dict]) -> tuple[list[dict], dict]:
         #         "User Management"/"Authentication"/"Account" 같은 인증 분열이
         #         단일 "회원·인증"으로 합쳐져 실제 중복 병합이 일어난다) ──────────
         raw_major = lf.get("category_major", "") or ""
-        canon, status = coerce_major(raw_major)
+        # 도메인 우선 분류 — leaf·중분류까지 보아 "폼·입력검증" 등 상호작용 유형이
+        # 제품 도메인을 가리지 않게 한다(2축 분리, 아이디어 A).
+        canon, status = classify_major(
+            raw_major, lf.get("category_mid", ""), lf.get("category_leaf", "")
+        )
         if status == "coerced":
             coerced_major += 1
             lf["category_major_raw"] = raw_major   # 추적성

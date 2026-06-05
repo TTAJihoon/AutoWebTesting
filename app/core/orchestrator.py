@@ -243,10 +243,15 @@ class Orchestrator:
         # _refine_leaves에서 이미 보정된 값은 idempotent(그대로 유지).
         leaves = self.ingest_result.get("leaves") or []
         if leaves:
-            from app.core.taxonomy import coerce_major
+            from app.core.taxonomy import classify_major
             swept = 0
             for lf in leaves:
-                canon, status = coerce_major(lf.get("category_major", "") or "")
+                # 도메인 우선 분류 — leaf·중분류 컨텍스트 전달(2축 분리, 아이디어 A)
+                canon, status = classify_major(
+                    lf.get("category_major", "") or "",
+                    lf.get("category_mid", ""),
+                    lf.get("category_leaf", ""),
+                )
                 if canon != (lf.get("category_major", "") or ""):
                     lf.setdefault("category_major_raw", lf.get("category_major", ""))
                     lf["category_major"] = canon
