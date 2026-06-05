@@ -36,8 +36,21 @@ def consolidate(
 
     _cb(f"기능 통합 시작 — {n0}개를 의미 기준으로 병합합니다 (LLM)")
 
+    # ── 정렬-배치 (아이디어 2) ───────────────────────────────────────────────
+    # 입력 순서대로 배치하면 같은 종류(예: 메뉴 링크)가 여러 배치로 흩어져
+    # LLM이 한 배치 안에서 못 만나 병합되지 않는다. (대분류,중분류,소분류) 기준으로
+    # 정렬해 동종 기능이 같은 배치에 모이게 하면 실제 병합률이 오른다.
+    # 정렬은 결정적(determinism) → 재현성 유지.
+    def _sort_key(lf: dict) -> tuple:
+        return (
+            (lf.get("category_major", "") or "").strip().lower(),
+            (lf.get("category_mid", "") or "").strip().lower(),
+            (lf.get("category_leaf", "") or "").strip().lower(),
+        )
+    sorted_leaves = sorted(leaves, key=_sort_key)
+
     # ── 1단계: 배치별 병합 ────────────────────────────────────────────────
-    batches = [leaves[i:i + _BATCH_SIZE] for i in range(0, n0, _BATCH_SIZE)]
+    batches = [sorted_leaves[i:i + _BATCH_SIZE] for i in range(0, n0, _BATCH_SIZE)]
     stage1_reps: list[dict] = []
     failed_batches = 0
     for bi, batch in enumerate(batches, 1):
