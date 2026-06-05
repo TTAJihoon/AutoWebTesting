@@ -160,8 +160,15 @@
 - 호출처: `stage1_ingest._refine_leaves`(DOM 경로) + `orchestrator` 통합 후 sweep.
 - 회귀: 단위 검증 + pytest 112 passed(기존 실패 1건 무관).
 
-**남은 후보(🔵):** 아이디어 3(전역 dedup 시그니처 text 제외), 4(D53 게이트 도메인 예산),
-5(noise 패턴 확장) — 필요 시 추가.
+**아이디어 4 구현 상세 (게이트 도메인 예산):** `app/ui/feature_gate.py`
+- 기능 확정 게이트(D53)에 도메인(대분류)별 **TC 예산 상한 스핀박스** 추가.
+- 기본값 = 전체(상한 없음) → 회귀 없음. 낮추면 해당 도메인을 상한만큼 제한.
+- **대표 우선 선정**: 중분류 라운드로빈(커버리지 우선) + confidence 높은 순 →
+  예산이 한 중분류에 쏠리지 않고 도메인 전반을 대표. 결정적(재현성).
+- 게이트 확정 시 `kept_leaves`를 예산만큼 트리밍 → Stage 2는 자동으로 예산 준수
+  (orchestrator/stage2 수정 불필요). `feature_gate.domain_budgets`로 추적성 기록.
+
+**남은 후보(🔵):** 아이디어 3(전역 dedup 시그니처 text 제외), 5(noise 패턴 확장) — 필요 시 추가.
 
 ---
 

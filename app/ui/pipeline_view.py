@@ -1038,7 +1038,15 @@ class PipelineView(QMainWindow):
                     "leaves_before": n_before,
                     "leaves_after": len(dlg.kept_leaves),
                     "excluded": excluded,
+                    "domain_budgets": dlg.domain_budgets,   # 도메인 예산 적용 결과
                 }
+                if dlg.domain_budgets:
+                    trimmed = sum(r["checked"] - r["kept"]
+                                  for r in dlg.domain_budgets.values())
+                    self._append_log(
+                        f"📊 도메인 예산 적용 — {len(dlg.domain_budgets)}개 도메인에서 "
+                        f"{trimmed}개 기능을 대표 우선으로 제한."
+                    )
             else:
                 self._append_log("기능 확정 게이트 취소 — 전체 기능으로 진행합니다.")
         if excluded:
